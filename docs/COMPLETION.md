@@ -294,6 +294,42 @@ full EMPLOYER lifecycle round-trip, WORM UPDATE/DELETE rejection, prefs
 round-trip with phone normalisation, and tenant isolation — idempotent
 across reruns (unique run suffixes).
 
+## Tranche 15 delivered — Minimum Pension Guarantee + Pension Protection Fund; Postgres for employer-portal & identity
+
+Driven by PenCom's November 2025 directive (Presidential Pension Security
+Initiative): a ₦52,500/month Minimum Pension Guarantee for CPS retirees,
+funded by the Pension Protection Fund (PPF) — FG + pension industry +
+states + private-sector employers — with the rule that STATE-sector
+retirees qualify only when their state has contributed to the PPF.
+
+**Tranche 15a (MPG/PPF engine):** `internal/mpg` implements the MPG
+top-up engine (below-floor retirees topped up to the ₦52,500 floor, PRA
+2014 s.84; actuarially-validated floor with periodic review metadata via
+`SetFloor`, which rejects unvalidated revisions) and the PPF contribution
+ledger (FG/INDUSTRY/STATE/EMPLOYER sources; a STATE contribution unlocks
+MPG access for that state's retirees — the PenCom gating rule). Integer
+kobo throughout. member-svc exposes `GET /api/v1/mpg/floor`,
+`POST/GET /api/v1/mpg/assessments` (payroll-batch assessment returning
+eligible/gated counts and total top-up) and `POST/GET
+/api/v1/ppf/contributions` (WORM ledger + per-source aggregates).
+`db/migrations/0004_mpg.sql` adds `ppf_contribution` (WORM trigger +
+REVOKE) and `mpg_assessment` with composite (tenant_id, id) keys;
+`internal/store.MPGRepo` persists both behind tenant-scoped transactions.
+Live-verified on Postgres 18.7: round-trip, state gating, WORM UPDATE
+rejection, and durability across service restart.
+
+**Tranche 15b (persistence completion):** employer-portal and identity
+now write onboarding cases through to Postgres when `DATABASE_URL` is set
+(same `store.OnboardingRepo` as member-svc; nil repo = previous in-memory
+behaviour). Every onboarding stakeholder pipeline (MEMBER, MICRO_MEMBER,
+RETIREE, NOK, EMPLOYER, STAFF, TENANT) is now durable across restarts.
+
+Unit suites: 8 mpg engine tests (floor, gating, aggregates, payroll
+batch, review validation) + repo validators; `TEST_DATABASE_URL`-gated
+integration test covers PPF ledger round-trip, WORM rejection, state
+gating and assessment persistence — idempotent across reruns.
+e2e.sh (26 checks) and e2e-onboarding.sh (31 checks) remain green.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the
