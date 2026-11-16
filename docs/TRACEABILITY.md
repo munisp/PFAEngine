@@ -118,3 +118,9 @@ spec's FR-501..503.
 | REG-06 i18n (en/yo/ha/ig/pcm-NG) | `internal/i18n` (Bundle.T fallback, LoadDir) + `i18n/en.json`, `i18n/pcm-NG.json` | Implemented |
 | SCM-09 pension increases | `internal/benefit/increase.go` (ApplyIncrease bps, EligibleIncrease surplus gate + MaxBps cap) | Implemented |
 | SCM-11 annuity marketplace | `internal/annuity` (RankQuotes NAICOM/expiry filter, maker-checker Purchase, ValidatePremium) | Implemented |
+
+## Tranche 11
+
+| Req | Implementation | Status |
+|---|---|---|
+| INT-07 WhatsApp channel (Meta Cloud API) | `internal/vendors/whatsapp.go` (SendTemplate/SendText with Bearer auth, VerifyWebhookSignature HMAC-SHA256 constant-time, VerifyChallenge handshake, ParseInbound); `chatbot.Responder.HandleWhatsApp` bridge; `cmd/notification` `/webhooks/whatsapp` GET/POST gated by the `whatsapp` tenant feature flag; `notify.Service.SendWhatsApp` hook wires WHATSAPP-channel templates to the adapter | Implemented |

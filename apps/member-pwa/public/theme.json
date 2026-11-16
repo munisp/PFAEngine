@@ -1,0 +1,16 @@
+{
+  "default": {
+    "bg": "#f7f4ee",
+    "surface": "#ffffff",
+    "ink": "#2e2a24",
+    "muted": "#8a8177",
+    "accent": "#a65a3a",
+    "accent-soft": "#f3e9e0",
+    "border": "#e7e0d5",
+    "ok": "#5e7b5a",
+    "warn": "#a85b32"
+  },
+  "tenants": {
+    "demo-pfa": {}
+  }
+}

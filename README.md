@@ -228,6 +228,39 @@ Any rules-engine change that alters these numbers fails CI.
 - `docs/SECURITY.md`: middleware inventory, auth flow, WORM audit and
   dual-control, tenant isolation.
 
+## Tranche 11: WhatsApp channel (Meta Cloud API)
+
+- `internal/vendors/whatsapp.go` — Meta WhatsApp Cloud API adapter
+  (INT-07): `SendTemplate`/`SendText` POST to
+  `/{phoneNumberId}/messages` with Bearer auth, `VerifyWebhookSignature`
+  (X-Hub-Signature-256 HMAC-SHA256, constant-time compare, fail-closed on
+  an unset app secret), `VerifyChallenge` for the subscription handshake,
+  and `ParseInbound` extracting inbound messages while ignoring status
+  updates. Conformance tests recompute the credential server-side and
+  assert the request shape, like the other vendor adapters.
+- `internal/chatbot` — `Responder.HandleWhatsApp` bridges inbound
+  WhatsApp text to the existing deterministic intent engine (English +
+  Nigerian Pidgin keywords) and returns the localized canned reply.
+- `cmd/notification` — `GET /webhooks/whatsapp` answers the Meta
+  challenge; `POST /webhooks/whatsapp` verifies the signature (401 on
+  mismatch), classifies each inbound text and replies via `SendText`.
+  The webhook bypasses the tenant header middleware (Meta carries none)
+  but is gated by the per-tenant `whatsapp` feature flag (opt-out,
+  default on); API endpoints stay tenant-scoped and health probes are
+  public.
+- `internal/notify` — `Service.SendWhatsApp` hook routes WHATSAPP-channel
+  templates through the adapter (sorted var keys → ordered Meta template
+  params) without an import cycle; falls back to the generic sender when
+  unwired.
+- `apps/member-pwa` — member-facing PWA (React+TS, Vite build verified):
+  RSA PIN + phone sign-in and KYC-gated onboarding against member-svc,
+  balance dashboard with naira formatting and fund badge, statement with
+  HMAC verify-code QR round-trip, I-Am-Alive selfie capture (getUserMedia
+  + file-input fallback), EN ↔ Nigerian Pidgin locale switcher, per-tenant
+  theming via CSS custom properties, and a hand-rolled service worker
+  (cache-first shell, network-first /api with last-known balance cached
+  for offline, offline fallback page).
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);

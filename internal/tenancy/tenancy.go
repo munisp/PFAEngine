@@ -86,6 +86,14 @@ func (r *Registry) Get(id string) (*Tenant, bool) {
 	return t, ok
 }
 
+// FeatureEnabled reports whether the named feature flag (e.g. "whatsapp")
+// is on for the tenant. The model is opt-out: an absent flag defaults to
+// enabled; only an explicit false disables the feature (NFR-20).
+func (t *Tenant) FeatureEnabled(name string) bool {
+	v, ok := t.FeatureFlags[name]
+	return !ok || v
+}
+
 func (r *Registry) List() []Tenant {
 	r.mu.Lock()
 	defer r.mu.Unlock()

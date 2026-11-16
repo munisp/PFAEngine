@@ -1,4 +1,4 @@
-# PFAEngine — Security Overview (Tranche 10)
+# PFAEngine — Security Overview (Tranche 11)
 
 This document summarises the shipped security controls: the HTTP middleware
 inventory, the authentication flow, the WORM audit trail with dual-control
@@ -59,6 +59,23 @@ All errors use the canonical envelope `{"error", "code"}`.
 - PII minimisation: NIN/BVN are verified via the provider facade and
   persisted hash-only (tokenized); KYC records never store raw identity
   numbers.
+
+## Webhook signature verification (WhatsApp, INT-07)
+
+- `POST /webhooks/whatsapp` (notification-service) accepts a delivery only
+  when `X-Hub-Signature-256` recomputes as
+  `"sha256=" + hex(HMAC-SHA256(body, WHATSAPP_APP_SECRET))` under a
+  constant-time comparison (`vendors.Client.VerifyWebhookSignature`); any
+  mismatch, malformed prefix, or missing header → 401 `BAD_SIGNATURE`. An
+  unset app secret fails closed — verification can never pass.
+- The GET subscription handshake requires `hub.mode=subscribe` and an exact
+  `hub.verify_token` match before the challenge is echoed; an unset
+  configured token also fails closed (403).
+- Webhook routes bypass the tenant-header middleware (Meta sends none) but
+  are gated by the tenant's `whatsapp` feature flag (403 when explicitly
+  disabled), and bodies are capped at 1 MiB via `http.MaxBytesReader`.
+- Outbound sends authenticate to the Graph API with a Bearer token;
+  secrets arrive only via environment variables, never config files.
 
 ## API contract validation
 

@@ -234,6 +234,24 @@ Verification: `go vet` clean, `go build` clean, **41/41 Go test packages pass**,
 - docs/SECURITY.md: middleware inventory, auth flow, WORM audit +
   dual control, tenant isolation, contract validation.
 
+## Tranche 11 delivered — member channel coverage
+
+Member-facing channel coverage now spans: USSD (chatbot parity intents),
+WhatsApp (Meta Cloud API webhook + template send), Flutter member app
+(source-scaffolded), the staff ops portal, and the new member PWA
+(apps/member-pwa, React+TS + Vite, hand-rolled service worker + web app
+manifest — no vite-plugin-pwa). The PWA signs in with RSA PIN + phone and
+onboards via the KYC-gated member-svc endpoint, shows the naira-formatted
+balance with a fund badge and last contribution, renders the statement
+HMAC verify code as a QR with a POST /api/v1/statements/verify round-trip,
+captures I-Am-Alive selfies via getUserMedia (file-input fallback, stub
+POST queued offline), switches EN ↔ Nigerian Pidgin (mirroring
+internal/i18n keys), themes per tenant via CSS custom properties from
+theme.json, and works offline: cache-first static shell, network-first
+/api with the last-known balance served from CacheStorage and an offline
+indicator, plus an offline fallback page. `npm run build`
+(tsc -b && vite build) verified; dist/ committed under apps/member-pwa.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the

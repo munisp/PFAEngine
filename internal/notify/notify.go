@@ -3,7 +3,9 @@
 package notify
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,6 +79,13 @@ type Service struct {
 	records   []DeliveryRecord
 	sender    Sender
 	seq       int
+
+	// SendWhatsApp routes WHATSAPP-channel templates through the Meta Cloud
+	// API adapter (INT-07) without notify importing vendors (vendors already
+	// imports notify, so a direct import would cycle). The cmd layer wires it
+	// to vendors.Client.SendTemplate. When nil, WhatsApp falls back to the
+	// generic sender.
+	SendWhatsApp func(ctx context.Context, to, template string, params []string) error
 }
 
 func NewService(sender Sender) *Service {
@@ -97,7 +106,7 @@ func (s *Service) Send(tenantID, templateID, to string, vars map[string]string) 
 		return nil, fmt.Errorf("notify: template %s not found", templateID)
 	}
 	body := Render(t, vars)
-	dlvID, err := s.sender.Send(t.Channel, to, body)
+	dlvID, err := s.dispatch(t, to, body, vars)
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +120,29 @@ func (s *Service) Send(tenantID, templateID, to string, vars map[string]string) 
 	}
 	s.records = append(s.records, *rec)
 	return rec, nil
+}
+
+// dispatch routes a rendered template to the right gateway. WhatsApp goes
+// through the SendWhatsApp hook (Meta templates take ordered positional
+// params, derived deterministically from the sorted var keys); everything
+// else uses the generic sender.
+func (s *Service) dispatch(t Template, to, body string, vars map[string]string) (string, error) {
+	if t.Channel == WhatsApp && s.SendWhatsApp != nil {
+		keys := make([]string, 0, len(vars))
+		for k := range vars {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		params := make([]string, len(keys))
+		for i, k := range keys {
+			params[i] = vars[k]
+		}
+		if err := s.SendWhatsApp(context.Background(), to, t.Name, params); err != nil {
+			return "", err
+		}
+		return "whatsapp:" + t.Name, nil
+	}
+	return s.sender.Send(t.Channel, to, body)
 }
 
 // AuditTrail returns the template delivery audit trail (FR-503).

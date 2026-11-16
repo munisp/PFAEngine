@@ -1,0 +1,151 @@
+/* member-pwa design tokens: low-saturation warm palette, ample whitespace,
+   mobile-first. All colors come from CSS custom properties so tenants can
+   re-theme at runtime via /theme.json (see src/theme.ts). */
+:root {
+  --bg: #f7f4ee;
+  --surface: #ffffff;
+  --ink: #2e2a24;
+  --muted: #8a8177;
+  --accent: #a65a3a;
+  --accent-soft: #f3e9e0;
+  --border: #e7e0d5;
+  --ok: #5e7b5a;
+  --warn: #a85b32;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { min-height: 100vh; }
+
+.shell {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 6.5rem; /* room for the bottom nav */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.brand { display: flex; flex-direction: column; }
+.brand strong { font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; }
+.brand span { font-size: 0.8rem; color: var(--muted); }
+
+.locale-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; background: var(--surface); }
+.locale-switch button {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 0.35rem 0.8rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+}
+.locale-switch button.active { background: var(--accent-soft); color: var(--accent); }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.balance-card { gap: 0.35rem; }
+.balance-card .label { font-size: 0.85rem; color: var(--muted); }
+.balance-card .amount { font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em; }
+.balance-card .sub { font-size: 0.85rem; color: var(--muted); }
+
+.badge {
+  align-self: flex-start;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.banner {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warn);
+  background: var(--accent-soft);
+  color: var(--ink);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+}
+.banner.ok { border-left-color: var(--ok); }
+
+h1 { font-size: 1.35rem; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+h2 { font-size: 1rem; font-weight: 650; margin: 0; }
+p { margin: 0; }
+.muted { color: var(--muted); font-size: 0.9rem; }
+
+form { display: flex; flex-direction: column; gap: 0.9rem; }
+label { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.85rem; color: var(--muted); }
+input, select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+button.primary {
+  border: 0; border-radius: 0.9rem; background: var(--accent); color: #fff;
+  padding: 0.9rem 1.25rem; font-size: 1rem; font-weight: 650; cursor: pointer;
+}
+button.primary:disabled { opacity: 0.55; cursor: default; }
+button.ghost {
+  border: 0; background: transparent; color: var(--accent);
+  font-size: 0.9rem; font-weight: 600; cursor: pointer; padding: 0.35rem;
+}
+button.secondary {
+  border: 1px solid var(--border); border-radius: 0.9rem; background: var(--surface);
+  color: var(--ink); padding: 0.8rem 1.25rem; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+}
+
+.qr { align-self: center; width: 11rem; height: 11rem; border: 1px solid var(--border); border-radius: 0.75rem; background: #fff; }
+.code-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem; word-break: break-all; color: var(--muted);
+  background: var(--bg); border-radius: 0.5rem; padding: 0.6rem;
+}
+
+.video-wrap { position: relative; border-radius: 1rem; overflow: hidden; background: #1d1a16; aspect-ratio: 3 / 4; }
+.video-wrap video, .video-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.navbar {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; justify-content: center;
+  padding: 0.5rem max(0.5rem, env(safe-area-inset-left)) calc(0.5rem + env(safe-area-inset-bottom));
+}
+.navbar nav { display: flex; gap: 0.5rem; width: 100%; max-width: 28rem; }
+.navbar button {
+  flex: 1; border: 0; border-radius: 0.75rem; background: transparent;
+  color: var(--muted); padding: 0.6rem 0.25rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+}
+.navbar button.active { background: var(--accent-soft); color: var(--accent); }
+
+@media (min-width: 30rem) {
+  .shell { padding-top: 2rem; }
+  .balance-card .amount { font-size: 2.5rem; }
+}
