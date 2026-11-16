@@ -25,6 +25,7 @@ import (
 	"github.com/munisp/pfaengine/internal/contribution"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/i18n"
+	"github.com/munisp/pfaengine/internal/invmandate"
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/member"
@@ -32,6 +33,7 @@ import (
 	"github.com/munisp/pfaengine/internal/money"
 	"github.com/munisp/pfaengine/internal/mpg"
 	"github.com/munisp/pfaengine/internal/onboarding"
+	"github.com/munisp/pfaengine/internal/pencare"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/retiree"
@@ -66,6 +68,14 @@ type deps struct {
 	mpgRepo   *store.MPGRepo
 	mpgMu     sync.Mutex
 	mpgAssess []mpg.Assessment
+	// Tranche 16a: PenCare retiree-healthcare registry (eligibility tied
+	// to the MPG floor; cards, premiums, fund ledger).
+	pencare     *pencare.Engine
+	pencareRepo *store.PenCareRepo
+	// Tranche 16b: infrastructure-investment mandate registry
+	// (FSD Africa $750m platform use case).
+	invmandate     *invmandate.Engine
+	invmandateRepo *store.InvMandateRepo
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -81,6 +91,8 @@ func main() {
 	var onbRepo onboarding.Repo
 	var prefsRepo prefs.Repo
 	var mpgRepo *store.MPGRepo
+	var pencareRepo *store.PenCareRepo
+	var invmandateRepo *store.InvMandateRepo
 	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
 		db, err := store.Open(context.Background(), dsn)
 		if err != nil {
@@ -90,26 +102,33 @@ func main() {
 		onbRepo = store.NewOnboardingRepo(db)
 		prefsRepo = store.NewPrefsRepo(db)
 		mpgRepo = store.NewMPGRepo(db)
-		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg persist to Postgres")
+		pencareRepo = store.NewPenCareRepo(db)
+		invmandateRepo = store.NewInvMandateRepo(db)
+		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate persist to Postgres")
 	}
+	mpgEngine := mpg.NewEngine()
 	d := &deps{
 		kyc: kyc.NewService(salt,
 			kyc.MockProvider{ProviderName: "mock-nimc"},
 			kyc.MockProvider{ProviderName: "mock-dojah"}),
-		members:     member.NewRegistry(),
-		ledger:      ledger.New(),
-		recon:       recon.NewEngine(),
-		audit:       aud,
-		authn:       authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
-		retirees:    retiree.NewRegister(),
-		prefs:       prefs.NewPersistentStore(prefs.NewStore(), prefsRepo),
-		alive:       newAliveTracker(),
-		onb:         onboarding.NewPersistentStore(onboarding.NewStore(aud), onbRepo),
-		onbPayloads: map[string]onboardPayload{},
-		micro:       map[string]*micropension.Account{},
-		mpgEngine:   mpg.NewEngine(),
-		mpgRepo:     mpgRepo,
-		stmtSecret:  []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
+		members:        member.NewRegistry(),
+		ledger:         ledger.New(),
+		recon:          recon.NewEngine(),
+		audit:          aud,
+		authn:          authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
+		retirees:       retiree.NewRegister(),
+		prefs:          prefs.NewPersistentStore(prefs.NewStore(), prefsRepo),
+		alive:          newAliveTracker(),
+		onb:            onboarding.NewPersistentStore(onboarding.NewStore(aud), onbRepo),
+		onbPayloads:    map[string]onboardPayload{},
+		micro:          map[string]*micropension.Account{},
+		mpgEngine:      mpgEngine,
+		mpgRepo:        mpgRepo,
+		pencare:        pencare.NewEngine(mpgEngine.Floor().Minimum),
+		pencareRepo:    pencareRepo,
+		invmandate:     invmandate.NewEngine(),
+		invmandateRepo: invmandateRepo,
+		stmtSecret:     []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
 	log.Fatal(srv.Run())
@@ -147,6 +166,23 @@ var apiRoutes = []routeEntry{
 	{"GET", "/api/v1/ppf/contributions", func(d *deps) http.HandlerFunc { return d.listPPF }},
 	{"POST", "/api/v1/mpg/assessments", func(d *deps) http.HandlerFunc { return d.assessMPG }},
 	{"GET", "/api/v1/mpg/assessments", func(d *deps) http.HandlerFunc { return d.listMPG }},
+	{"GET", "/api/v1/pencare/fund", func(d *deps) http.HandlerFunc { return d.pencareFund }},
+	{"POST", "/api/v1/pencare/fund/contributions", func(d *deps) http.HandlerFunc { return d.createPenCareContribution }},
+	{"GET", "/api/v1/pencare/fund/contributions", func(d *deps) http.HandlerFunc { return d.listPenCareContributions }},
+	{"POST", "/api/v1/pencare/enrollees", func(d *deps) http.HandlerFunc { return d.enrollPenCare }},
+	{"GET", "/api/v1/pencare/enrollees", func(d *deps) http.HandlerFunc { return d.listPenCareEnrollees }},
+	{"POST", "/api/v1/pencare/cards", func(d *deps) http.HandlerFunc { return d.requestPenCareCard }},
+	{"GET", "/api/v1/pencare/cards", func(d *deps) http.HandlerFunc { return d.listPenCareCards }},
+	{"POST", "/api/v1/pencare/premiums", func(d *deps) http.HandlerFunc { return d.payPenCarePremium }},
+	{"GET", "/api/v1/pencare/premiums", func(d *deps) http.HandlerFunc { return d.listPenCarePremiums }},
+	{"POST", "/api/v1/investment/mandates", func(d *deps) http.HandlerFunc { return d.createMandate }},
+	{"GET", "/api/v1/investment/mandates", func(d *deps) http.HandlerFunc { return d.listMandates }},
+	{"POST", "/api/v1/investment/config", func(d *deps) http.HandlerFunc { return d.setInvConfig }},
+	{"POST", "/api/v1/investment/commitments", func(d *deps) http.HandlerFunc { return d.createCommitment }},
+	{"GET", "/api/v1/investment/commitments", func(d *deps) http.HandlerFunc { return d.listCommitments }},
+	{"POST", "/api/v1/investment/deployments", func(d *deps) http.HandlerFunc { return d.createDeployment }},
+	{"GET", "/api/v1/investment/deployments", func(d *deps) http.HandlerFunc { return d.listDeployments }},
+	{"GET", "/api/v1/investment/exposure", func(d *deps) http.HandlerFunc { return d.invExposure }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for

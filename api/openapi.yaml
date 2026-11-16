@@ -288,6 +288,94 @@ paths:
       summary: PPF ledger with per-source aggregates
       tags: [Benefits & Transfers]
       responses: { '200': { description: Contributions + aggregates } }
+  /v1/pencare/fund:
+    get:
+      summary: PenCare fund headline — MPG floor, active enrollees/cards, per-source aggregates
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: Fund headline } }
+  /v1/pencare/fund/contributions:
+    post:
+      summary: Record a PenCare fund contribution (INDUSTRY | PFA | PENCOM | DONOR; WORM ledger)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Recorded } }
+    get:
+      summary: PenCare fund ledger
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: Contributions } }
+  /v1/pencare/enrollees:
+    post:
+      summary: Enrol a low-income retiree in PenCare (pension below MPG floor)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Enrolled }, '422': { description: Not low-income } }
+    get:
+      summary: List PenCare enrollees
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: Enrollees } }
+  /v1/pencare/cards:
+    post:
+      summary: Request a PenCare health access card (optionally issue+activate with card_number)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Requested/issued }, '422': { description: Rejected } }
+    get:
+      summary: List PenCare cards (optional enrollee_id filter)
+      tags: [Benefits & Transfers]
+      parameters:
+        - { name: enrollee_id, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Cards } }
+  /v1/pencare/premiums:
+    post:
+      summary: Record an insurer premium payment for an enrollee (WORM)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Recorded }, '422': { description: Rejected } }
+    get:
+      summary: List PenCare premium payments (optional enrollee_id filter)
+      tags: [Benefits & Transfers]
+      parameters:
+        - { name: enrollee_id, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Premiums } }
+  /v1/investment/mandates:
+    post:
+      summary: Register an infrastructure-investment mandate (e.g. FSD Africa platform; USD/NGN)
+      tags: [Investments]
+      responses: { '201': { description: Created }, '422': { description: Rejected } }
+    get:
+      summary: List investment mandates
+      tags: [Investments]
+      responses: { '200': { description: Mandates } }
+  /v1/investment/config:
+    post:
+      summary: Set RSA-fund AUM (kobo) and/or FX rate (kobo per USD) for exposure cap checks
+      tags: [Investments]
+      responses: { '200': { description: Updated } }
+  /v1/investment/commitments:
+    post:
+      summary: Record a fund commitment — gated on mandate open, target headroom, per-fund cap (WORM)
+      tags: [Investments]
+      responses: { '201': { description: Recorded }, '422': { description: Cap/target/closed rejection } }
+    get:
+      summary: List commitments (optional mandate_id filter)
+      tags: [Investments]
+      parameters:
+        - { name: mandate_id, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Commitments } }
+  /v1/investment/deployments:
+    post:
+      summary: Deploy committed capital into a vehicle/SPV (never exceeds commitments; WORM)
+      tags: [Investments]
+      responses: { '201': { description: Recorded }, '422': { description: Over-deployment rejection } }
+    get:
+      summary: List deployments (optional mandate_id filter)
+      tags: [Investments]
+      parameters:
+        - { name: mandate_id, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Deployments } }
+  /v1/investment/exposure:
+    get:
+      summary: Mandate exposure report — target, committed, deployed, headroom, undrawn, fill %
+      tags: [Investments]
+      parameters:
+        - { name: mandate_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Exposure }, '404': { description: Mandate not found } }
 components:
   securitySchemes:
     tenantHeader:

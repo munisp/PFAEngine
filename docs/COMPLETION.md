@@ -330,6 +330,39 @@ integration test covers PPF ledger round-trip, WORM rejection, state
 gating and assessment persistence — idempotent across reruns.
 e2e.sh (26 checks) and e2e-onboarding.sh (31 checks) remain green.
 
+## Tranche 16 delivered — PenCare retiree healthcare + infrastructure-investment mandates
+
+Closes the two gaps identified against the November 2025 Presidential
+Pension Security Initiative (₦52,500 MPG launch):
+
+**T16a — PenCare registry** (`internal/pencare`, `db/migrations/0005_pencare.sql`,
+`store.PenCareRepo`, 9 member-svc endpoints under `/api/v1/pencare/*`):
+enrollee registry with low-income eligibility tied to the MPG floor
+(pension < ₦52,500; floor sourced live from the MPG engine), health
+access-card lifecycle (REQUESTED → ISSUED → ACTIVE, one live card per
+enrollee — the "demand your card at your PFA" flow), insurer premium
+payments (WORM), and the industry fund ledger (WORM; INDUSTRY / PFA /
+PENCOM / DONOR sources with per-source aggregates — the ₦7bn+ industry
+pool is bookable and auditable).
+
+**T16b — Infrastructure-investment mandates** (`internal/invmandate`,
+`db/migrations/0006_invmandate.sql`, `store.InvMandateRepo`, 8 endpoints
+under `/api/v1/investment/*`): mandate registry for pension co-investment
+vehicles (the FSD Africa–backed $750m infrastructure platform is the
+reference use case — USD mandate, $750m target, per-fund 5%-of-AUM cap).
+Three hard gates on every commitment: mandate open, target not
+oversubscribed, per-fund exposure cap (basis points of fund AUM, FX
+converted, fails closed when AUM unset). Deployments can never exceed
+undrawn commitments. Commitments and deployments are WORM; exposure
+reporting (`/investment/exposure`) rebuilds from Postgres after restart.
+
+Verification: 7 pencare + 7 invmandate engine tests, repo validators,
+`TEST_DATABASE_URL`-gated round-trips incl. WORM rejection on all four
+new ledgers; 48 Go packages green; 4/4 Rust; e2e.sh + e2e-onboarding.sh
+PASS; live smoke with `DATABASE_URL` (eligibility rejection at floor,
+cap breach rejection, over-deployment rejection) and full restart
+durability read-back.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the
