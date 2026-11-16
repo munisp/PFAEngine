@@ -1,17 +1,17 @@
 # PFAEngine v1 — Completion Report
 
 Build date: 2026-11-16 · Stack: Go 1.23 (services) · Rust (ledger hot path)
-Verification: `go vet` clean, `go build` clean, **22/22 Go test packages pass**,
+Verification: `go vet` clean, `go build` clean, **28/28 Go test packages pass**,
 **4/4 Rust tests pass**, gofmt clean.
 
 ## Scores
 
 | Scope | Score | Basis |
 |---|---|---|
-| Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **92%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines implemented + tested; gaps: Postgres repository wiring, real vendor credentials, Temporal durable workers |
-| Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **88%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention added; USSD/agent rails and Kubecost outstanding |
-| Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **18%** | Webhook framework + AML done; lakehouse/chatbot designed only |
-| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **76%** | Tranche 4: FR-501..509, FR-513 + BR-11..19, BR-22 implemented; FR-510..512, BR-20/21 deferred; REG framework complete; PLT 3/14; NFR-13..24 partial |
+| Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **95%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) implemented + tested; gaps: Postgres repository wiring, real vendor credentials, Temporal durable workers |
+| Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **95%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); USSD/agent rails and Kubecost outstanding |
+| Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **25%** | Webhook framework + AML done; capital-adequacy tracking (FR-517) added; lakehouse/chatbot designed only |
+| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **85%** | Tranches 4–5: FR-501..517 + BR-11..28 implemented (all deferred Tranche-4 items closed); REG framework complete; PLT 3/14; NFR-13..24 partial |
 
 ## What is production-shaped today
 - Money/ledger correctness: integer kobo, 8-decimal units, enforced double
@@ -68,6 +68,34 @@ Verification: `go vet` clean, `go build` clean, **22/22 Go test packages pass**,
   12mo+3mo suspension trigger, 5-year liveness-evidence retention.
 - Rules pack v2 (rules/ng/pencom.json ops-2025@v2): 2025 fund caps, fee
   rates, penalty/deadline/report thresholds — golden-tested (NFR-22).
+
+## Tranche 5 delivered (2026-11-16)
+- Investment compliance (internal/investment, FR-510/BR-16): per-fund
+  variable-income caps from the rules pack, per-issuer (10%) / per-issue
+  (5%) limits, 'A' minimum debt rating with 20% BBB basket, 10-working-day
+  downgrade exit, prohibited-transaction screen (related parties incl.
+  custodian, margin trading, borrowing except repo/sec-lending).
+- Regulatory returns (internal/returns, FR-511): daily valuation report,
+  36-month-style rolling annualized return, Sharpe (integer x100), TWR
+  compounding for non-unitised AES funds, monthly/quarterly RMAS returns.
+- Death benefits (internal/death + workflow.DeathClaimWorkflow,
+  FR-512/BR-20): Will-probate / Letter-of-Administration claims, required
+  document checklist, NOK KYC gate, maker-checker approval, 7-day docs SLA
+  escalation, payout + NOK notification activities.
+- GLIP (internal/employer, FR-515/BR-26): 3x-emolument cover validation,
+  expiry, clearance-certificate evidence bundle (policy + 3 fiscal years).
+- Nominal RSA (internal/member/nominal.go, FR-516/BR-27): 6-month due
+  check, employer-initiated nominal RSA, member claim/merge.
+- Capital adequacy (internal/capital, FR-517/BR-25): ₦20bn base (₦30bn
+  NPF), +1% of AUM above ₦500bn, 90-day cure deadline.
+- Mortgage equity (internal/benefit/mortgage.go, BR-21): 25% RSA limit
+  through CBN-licensed lenders only.
+- Legacy schemes (internal/legacy, BR-23/24/28): AES/CPFA/ABS compliance
+  checks, income-7.5% / capped-1.1% / asset-based fee models, TWR vs
+  unit-price performance, NSITF pre-2004 credit recognition.
+- BVN/NIN format validation (internal/kyc, FR-514): 11-digit numeric
+  checks wired into registration verification.
+- FCY 48-hour return SLA (workflow.FCYReturnWorkflow, BR-22/NFR-23).
 
 ## Known gaps (next tranches, in priority order)
 1. Extend Postgres repos to member/kyc/reporting/statement services

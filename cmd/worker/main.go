@@ -25,6 +25,8 @@ func main() {
 	w.RegisterWorkflow(workflow.TransferWorkflow)
 	w.RegisterWorkflow(workflow.ClaimWorkflow)
 	w.RegisterWorkflow(workflow.LivenessCampaignWorkflow)
+	w.RegisterWorkflow(workflow.DeathClaimWorkflow)
+	w.RegisterWorkflow(workflow.FCYReturnWorkflow)
 	w.RegisterActivity(wf)
 
 	log.Printf("[worker] task queue pfaengine-core on %s", hostPort)

@@ -87,6 +87,23 @@ Any rules-engine change that alters these numbers fails CI.
   reconciliation exception queue with aging, claims maker-checker,
   dual-control audit export, TOTP login.
 
+## Tranche 5: remaining PenCom gap items
+
+- `internal/investment` (FR-510/BR-16): variable-income caps from the rules
+  pack, per-issuer/per-issue limits, 'A' rating gate + 20% BBB basket,
+  prohibited-transaction screen (related parties, margin, borrowing).
+- `internal/returns` (FR-511): daily valuation, rolling annualized return,
+  Sharpe, TWR, monthly/quarterly RMAS returns.
+- `internal/death` + `DeathClaimWorkflow` (FR-512/BR-20): Will/LoA claims,
+  NOK KYC, maker-checker payout, 7-day docs SLA escalation.
+- `internal/employer` GLIP (FR-515/BR-26), `internal/member` nominal RSA
+  (FR-516/BR-27), `internal/capital` adequacy with 90-day cure
+  (FR-517/BR-25), `internal/benefit` mortgage equity 25% (BR-21),
+  `internal/legacy` AES/CPFA/ABS + NSITF credits (BR-23/24/28).
+- `internal/kyc`: BVN/NIN 11-digit format validation wired into
+  registration (FR-514); `FCYReturnWorkflow` enforces the 48-hour FCY
+  return SLA (BR-22/NFR-23).
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);

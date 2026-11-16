@@ -180,7 +180,11 @@ func (s *Service) hashID(raw string) string {
 
 // VerifyNIN runs NIN verification, stores only the provider token, and
 // registers the salted identity hash for cross-tenant duplicate detection.
+// FR-514: the NIN must pass 11-digit format validation first.
 func (s *Service) VerifyNIN(tenantID, personID, nin, name, dob string) (NINRecord, string, error) {
+	if err := ValidateNINFormat(nin); err != nil {
+		return NINRecord{}, "", err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var res VerifyResult
@@ -211,7 +215,12 @@ func (s *Service) VerifyNIN(tenantID, personID, nin, name, dob string) (NINRecor
 }
 
 // ValidateBVN persists only a salted hash and binds the OTP phone (FR-102).
+// FR-514: the BVN must pass 11-digit format validation first (mandatory
+// for registration and recapture from 1 Feb 2025).
 func (s *Service) ValidateBVN(tenantID, personID, bvn, name, dob, phone string) (BVNRecord, string, error) {
+	if err := ValidateBVNFormat(bvn); err != nil {
+		return BVNRecord{}, "", err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var res VerifyResult

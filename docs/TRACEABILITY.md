@@ -55,7 +55,7 @@
 Analytics/lakehouse (Flink/Ray/Sedona), chatbot, open partner APIs beyond
 webhooks, ISO 27001 certification work, Flutter app, React portal.
 
-## Tranche 4 — PenCom/PRA 2014 gap analysis (docs/ADDITIONAL-REQUIREMENTS.md)
+## Tranches 4–5 — PenCom/PRA 2014 gap analysis (docs/ADDITIONAL-REQUIREMENTS.md)
 
 FR-5xx IDs below are the *additional* scheme (Tranche 4), not the base
 spec's FR-501..503.
@@ -71,8 +71,8 @@ spec's FR-501..503.
 | BR-17 micro-pension 40/60 + contingent access | `internal/micropension` | Implemented |
 | BR-18 voluntary contributions 50/50, tax, EFCC | `internal/vc` | Implemented |
 | BR-19 benefit access rules (SRBC, en-bloc, job loss) | `internal/benefit/srbc.go` | Implemented |
-| BR-20 death benefits (Will/LoA) | — | Deferred (Tranche 5) |
-| BR-21 mortgage equity 25% | — | Deferred (Tranche 5) |
+| BR-20 death benefits (Will/LoA) | `internal/death` (Claim, RequiredDocs, maker-checker) + `workflow.DeathClaimWorkflow` | Implemented |
+| BR-21 mortgage equity 25% | `benefit.MortgageEquityLimit/ValidateMortgageEquity` | Implemented |
 | BR-22 Fund VII FCY USD | `internal/fcy` (Cents, 60/40, 2/yr cap, NFIU) | Implemented |
 | FR-501 penalty engine | `internal/penalty` + tests | Implemented |
 | FR-502 fee engine | `internal/fees` + tests | Implemented |
@@ -83,8 +83,19 @@ spec's FR-501..503.
 | FR-507 job-loss 25% withdrawal | `benefit.JobLossEligible` | Implemented |
 | FR-508 Fund VII FCY service | `internal/fcy` + tests | Implemented |
 | FR-509 RTS ETD correction + GNTP | `transfer.EffectiveTransferDate`, `transfer.NetPositions`, corrected `SubmitToCycle` | Implemented |
-| FR-510 investment compliance engine | — | Deferred (Tranche 5) |
-| FR-511 regulatory returns (RMAS) | — | Deferred (Tranche 5) |
-| FR-512 death-benefit workflow | — | Deferred (Tranche 5) |
+| FR-510 investment compliance engine | `internal/investment` (CheckCompliance, Prohibited, LimitsForFund) | Implemented |
+| FR-511 regulatory returns (RMAS) | `internal/returns` (DailyValuation, RollingReturn, Sharpe, TWR, RMASReturn) | Implemented |
+| FR-512 death-benefit workflow | `internal/death` + `workflow.DeathClaimWorkflow` (7-day docs SLA, maker-checker, payout, NOK notify) | Implemented |
 | FR-513 I-Am-Alive 2026 NOK + retention | `retiree.Retiree.NextOfKinID/EvidenceRetainedUntil`, `NOKNotifyDue`, `RecordLivenessEvidence` | Implemented |
+| FR-514 BVN/NIN mandatory format validation | `kyc.ValidateBVNFormat/ValidateNINFormat` wired into `VerifyNIN`/`ValidateBVN` | Implemented |
+| FR-515 GLIP tracking + clearance evidence | `internal/employer/glip.go` (GLIP.Valid, ClearanceEvidence) | Implemented |
+| FR-516 nominal RSA workflow | `member.NominalDue`, `member.NominalRSA.Claim` | Implemented |
+| FR-517 tenant capital adequacy | `internal/capital` (RequiredCapital, Assess 90-day cure) | Implemented |
+| BR-23/24 AES/ABS support | `internal/legacy` (Scheme.Compliant, FeeModel, PerformanceMethod) | Implemented |
+| BR-25 recapitalisation monitoring | `internal/capital` (₦20bn/NPF ₦30bn, ₦500bn AUM surcharge) | Implemented |
+| BR-26 GLIP ≥3x emolument | `employer.GLIP.Valid` | Implemented |
+| BR-27 nominal RSA after 6 months | `member.NominalDue` | Implemented |
+| BR-28 NSITF legacy credits | `legacy.NSITFCredit` | Implemented |
+| BR-16 engine enforcement | `investment.CheckCompliance` (caps from rules pack) | Implemented |
+| BR-22 48-hr FCY return SLA | `workflow.FCYReturnWorkflow` + `RaiseFCYSLAAlarm` | Implemented |
 | Rules pack v2 (funds, fees, penalty, thresholds) | `rules/ng/pencom.json` ops-2025@v2 + `internal/rules/ops_golden_test.go` | Implemented |

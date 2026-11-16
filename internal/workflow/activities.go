@@ -70,6 +70,38 @@ func (Activities) ReinstateRetiree(ctx context.Context, rsaID string) error {
 	return nil
 }
 
+// EscalateDeathClaim flags a death-benefit claim whose documentation is
+// still pending after the 7-day SLA (FR-512).
+func (Activities) EscalateDeathClaim(ctx context.Context, claimID string) error {
+	actlog(ctx, "death.escalated id=%s", claimID)
+	return nil
+}
+
+// PayDeathBenefit instructs the custodian payout to beneficiaries (FR-512).
+func (Activities) PayDeathBenefit(ctx context.Context, claimID string, amountKobo int64) error {
+	actlog(ctx, "death.payout id=%s amount=%d", claimID, amountKobo)
+	return nil
+}
+
+// NotifyNOK notifies the next-of-kin of a death-claim outcome (FR-512/513).
+func (Activities) NotifyNOK(ctx context.Context, nokID, claimID string) error {
+	actlog(ctx, "nok.notified nok=%s claim=%s", nokID, claimID)
+	return nil
+}
+
+// InitiateFCYReturn starts the return of an uncreditable FCY contribution
+// (BR-22 48-hour window).
+func (Activities) InitiateFCYReturn(ctx context.Context, ref string, amountCents int64) error {
+	actlog(ctx, "fcy.return.initiated ref=%s cents=%d", ref, amountCents)
+	return nil
+}
+
+// RaiseFCYSLAAlarm raises the 48-hour FCY-return SLA breach alarm.
+func (Activities) RaiseFCYSLAAlarm(ctx context.Context, ref string) error {
+	actlog(ctx, "fcy.return.sla.alarm ref=%s", ref)
+	return nil
+}
+
 func actlog(ctx context.Context, format string, args ...any) {
 	log.Printf("[activity] "+format, args...)
 }

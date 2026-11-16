@@ -194,3 +194,107 @@ func LivenessCampaignWorkflow(ctx workflow.Context, li LivenessInput) error {
 	// Continue as new for the next 12-month cycle.
 	return workflow.NewContinueAsNewError(ctx, LivenessCampaignWorkflow, li)
 }
+
+// ---------- Death-benefit claim workflow (FR-512 / BR-20) ----------
+
+// DeathClaimInput starts a death-benefit payout to the deceased member's
+// beneficiaries under a Will admitted to probate or a Letter of
+// Administration.
+type DeathClaimInput struct {
+	TenantID   string
+	ClaimID    string
+	RSAID      string
+	NOKID      string
+	AmountKobo int64
+}
+
+// DeathClaimWorkflow: await docs-verified signal (Will/LoA, death
+// certificate, burial warrant, NOK KYC) with a 7-day SLA escalation, then
+// a maker-checker decision signal, then the payout activity, then NOK
+// notification.
+func DeathClaimWorkflow(ctx workflow.Context, di DeathClaimInput) (string, error) {
+	state := "SUBMITTED"
+	_ = workflow.SetQueryHandler(ctx, QueryState, func() (string, error) { return state, nil })
+	ao := workflow.WithActivityOptions(ctx, activityOpts)
+
+	// Await documentation with a 7-day SLA, else escalate.
+	docsOK := false
+	sel := workflow.NewSelector(ctx)
+	sel.AddReceive(workflow.GetSignalChannel(ctx, SignalDocsVerified), func(c workflow.ReceiveChannel, more bool) {
+		c.Receive(ctx, nil)
+		docsOK = true
+	})
+	sel.AddFuture(workflow.NewTimer(ctx, 7*24*time.Hour), func(f workflow.Future) {})
+	sel.Select(ctx)
+	if !docsOK {
+		_ = workflow.ExecuteActivity(ao, "EscalateDeathClaim", di.ClaimID).Get(ctx, nil)
+		return "ESCALATED_DOCS_PENDING", nil
+	}
+	state = "DOCS_VERIFIED"
+
+	// Maker-checker decision signal (approver != submitter enforced by
+	// the death.Claim domain object).
+	var decision ClaimDecision
+	sel2 := workflow.NewSelector(ctx)
+	sel2.AddReceive(workflow.GetSignalChannel(ctx, SignalClaimDecision), func(c workflow.ReceiveChannel, more bool) {
+		c.Receive(ctx, &decision)
+	})
+	sel2.Select(ctx)
+	if !decision.Approve {
+		state = "REJECTED"
+		_ = workflow.ExecuteActivity(ao, "NotifyNOK", di.NOKID, di.ClaimID).Get(ctx, nil)
+		return state, nil
+	}
+	state = "APPROVED"
+
+	// Payout to beneficiaries, then notify the next-of-kin.
+	if err := workflow.ExecuteActivity(ao, "PayDeathBenefit", di.ClaimID, di.AmountKobo).Get(ctx, nil); err != nil {
+		return "PAYOUT_FAILED", err
+	}
+	state = "PAID"
+	_ = workflow.ExecuteActivity(ao, "NotifyNOK", di.NOKID, di.ClaimID).Get(ctx, nil)
+	return "NOK_NOTIFIED", nil
+}
+
+// ---------- FCY 48-hour return workflow (FR-508 / BR-22) ----------
+
+// SignalFCYReturned confirms an uncreditable FCY contribution was returned.
+const SignalFCYReturned = "fcy-returned"
+
+// FCYReturnInput starts the return of an uncreditable Fund VII (USD)
+// contribution.
+type FCYReturnInput struct {
+	TenantID    string
+	Ref         string
+	AmountCents int64
+}
+
+// FCYReturnWorkflow: initiate the return of an uncreditable FCY
+// contribution, then await confirmation within the 48-hour regulatory
+// window (BR-22); on breach raise an SLA alarm (NFR-23).
+func FCYReturnWorkflow(ctx workflow.Context, fi FCYReturnInput) (string, error) {
+	state := "RECEIVED_UNCREDITABLE"
+	_ = workflow.SetQueryHandler(ctx, QueryState, func() (string, error) { return state, nil })
+	ao := workflow.WithActivityOptions(ctx, activityOpts)
+
+	if err := workflow.ExecuteActivity(ao, "InitiateFCYReturn", fi.Ref, fi.AmountCents).Get(ctx, nil); err != nil {
+		return state, err
+	}
+	state = "RETURN_INITIATED"
+
+	returned := false
+	sel := workflow.NewSelector(ctx)
+	sel.AddReceive(workflow.GetSignalChannel(ctx, SignalFCYReturned), func(c workflow.ReceiveChannel, more bool) {
+		c.Receive(ctx, nil)
+		returned = true
+	})
+	sel.AddFuture(workflow.NewTimer(ctx, 48*time.Hour), func(f workflow.Future) {})
+	sel.Select(ctx)
+	if !returned {
+		_ = workflow.ExecuteActivity(ao, "RaiseFCYSLAAlarm", fi.Ref).Get(ctx, nil)
+		return "SLA_BREACHED", nil
+	}
+	state = "RETURNED"
+	_ = workflow.ExecuteActivity(ao, "NotifyMember", fi.Ref).Get(ctx, nil)
+	return state, nil
+}

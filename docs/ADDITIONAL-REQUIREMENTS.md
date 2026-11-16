@@ -1,6 +1,6 @@
 # Additional Business & Technical Requirements — PenCom/PRA 2014 Gap Analysis
 
-**Version:** 1.0 (Tranche 4) — **Date:** 2026-11-16
+**Version:** 1.1 (Tranche 5) — **Date:** 2026-11-16
 **Sources:** https://www.pencom.gov.ng/pension-fund-administrators/, PRA 2014 (ss.2,4,7,8,10,11,13,51,55-91), Revised Regulation on Investment of Pension Fund Assets (Sept 2025), Revised Regulation for the Transfer of RSA (Feb 2024), Guidelines for Micro Pension Plan, Guidelines on Voluntary Contributions (rev. June 2024), PenCom circulars 2025-2026 (recapitalisation, BVN mandate, I-Am-Alive, PSSP remittance, delegated benefit approvals).
 
 This document extends the base specification (PFA-as-a-Service-Specification) with requirements derived from direct analysis of the PenCom PFA framework. IDs continue existing schemes (BR-, FR-, REG-, SCM-, NFR-). Each item maps to a primary regulation.
@@ -61,7 +61,7 @@ This document extends the base specification (PFA-as-a-Service-Specification) wi
 | NFR-22 | Every new rule parameter (rates, thresholds, deadlines) lives in `rules/ng/pencom.json` (or new packs) — no hard-coded regulatory constants in service code. |
 | NFR-23 | Penalty/fee computations must be deterministic and replay-safe; Temporal workflows used for multi-day SLAs (2-day benefit payout, 48-hr FCY return, 90-day capital cure). |
 
-## 4. Tranche 4 Implementation Scope (this delivery)
+## 4. Tranche 4/5 Implementation Scope (delivered)
 
 Implemented in code (Tranche 4):
 - FR-501 penalty engine (`internal/penalty`) + BR-11/BR-12 (14-day report set)
@@ -75,4 +75,14 @@ Implemented in code (Tranche 4):
 - FR-513 NOK notification + 5-year evidence retention fields (`internal/retiree` extension)
 - Rules pack `rules/ng/pencom.json` v2: 2025 fund table, fee rates, penalty rate, SRBC bounds, en-bloc threshold, VC/micro splits — with golden tests.
 
-Deferred to Tranche 5+: FR-510 investment compliance, FR-511 full RMAS returns, FR-512 death workflow, FR-515/516 GLIP/nominal RSA, FR-517 capital dashboard, BR-23/24 AES/ABS modules.
+Implemented in code (Tranche 5) — all previously deferred items:
+- FR-510 investment compliance engine (`internal/investment`): variable-income cap, per-issuer/per-issue limits, 'A' rating gate + 20% BBB basket, 10-day downgrade exit, prohibited-transaction screen (related parties, margin, borrowing except repo/sec-lending) + BR-16 enforcement
+- FR-511 regulatory returns (`internal/returns`): daily valuation report, rolling annualized return, Sharpe, TWR, monthly/quarterly RMAS returns
+- FR-512 death-benefit workflow (`internal/death` + `internal/workflow.DeathClaimWorkflow`) + BR-20
+- FR-514 BVN/NIN 11-digit format validation wired into registration (`internal/kyc.ValidateBVNFormat/ValidateNINFormat`)
+- FR-515 GLIP tracking + clearance evidence (`internal/employer/glip.go`) + BR-26
+- FR-516 nominal RSA workflow (`internal/member/nominal.go`) + BR-27
+- FR-517 tenant capital adequacy (`internal/capital`) + BR-25: ₦20bn base, ₦500bn AUM surcharge, 90-day cure
+- BR-21 mortgage equity 25% via CBN-licensed lender (`internal/benefit/mortgage.go`)
+- BR-23/24/28 legacy schemes: AES/CPFA/ABS compliance checks, fee models, TWR vs unit-price, NSITF credits (`internal/legacy`)
+- `internal/workflow.FCYReturnWorkflow`: 48-hour return of uncreditable FCY contributions with SLA alarm (BR-22/NFR-23)
