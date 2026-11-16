@@ -174,6 +174,46 @@ paths:
       parameters:
         - { name: return_code, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: Return draft } }
+  /v1/onboarding:
+    post:
+      summary: Open a unified onboarding case (FR-520) for a person-facing stakeholder (MEMBER, MICRO_MEMBER, RETIREE, NOK)
+      tags: [Onboarding & KYC]
+      responses: { '201': { description: Case created (DRAFT) }, '400': { description: Unknown stakeholder / missing fields } }
+  /v1/onboarding/{id}:
+    get:
+      summary: Onboarding case status, steps and linked entity (FR-520)
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Case }, '404': { description: Unknown case } }
+  /v1/onboarding/{id}/steps/{step}:
+    post:
+      summary: Complete a pipeline step in order (KYC steps run via the KYC facade; auto-approve pipelines reach ACTIVE)
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: step, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Step completed; case returned }
+        '400': { description: Unknown step / missing evidence }
+        '409': { description: Out-of-order, already done, or terminal case }
+        '422': { description: KYC/liveness check failed }
+  /v1/onboarding/{id}/approve:
+    post:
+      summary: Approve an APPROVAL_PENDING case (staff-only, maker-checker via X-Actor)
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: X-Actor, in: header, required: true, schema: { type: string } }
+      responses: { '200': { description: ACTIVE }, '403': { description: Maker-checker violation }, '409': { description: Not pending approval } }
+  /v1/onboarding/{id}/reject:
+    post:
+      summary: Reject a case with a mandatory reason (staff-only, maker-checker via X-Actor)
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: X-Actor, in: header, required: true, schema: { type: string } }
+      responses: { '200': { description: REJECTED }, '403': { description: Maker-checker violation }, '409': { description: Terminal case } }
   /v1/audit/export:
     get:
       summary: Export hash-chained audit slice with integrity check (staff-only, dual control)

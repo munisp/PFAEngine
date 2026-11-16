@@ -261,6 +261,51 @@ Any rules-engine change that alters these numbers fails CI.
   (cache-first shell, network-first /api with last-known balance cached
   for offline, offline fallback page).
 
+## Tranche 13: unified onboarding framework (FR-520)
+
+- `internal/onboarding` — one state machine for every platform
+  stakeholder. A `Case` walks DRAFT → DOCS_PENDING → KYC_PENDING →
+  APPROVAL_PENDING → ACTIVE | REJECTED | SUSPENDED; `Pipeline(stakeholder)`
+  returns the ordered step template for MEMBER (nin_verify, bvn_validate,
+  consent_record, liveness_enroll, rsa_open), MICRO_MEMBER (id_capture,
+  pin_request, optional first contribution), EMPLOYER (rc_validate,
+  glip_evidence, mandate_form, pssp_link, approval marker), RETIREE
+  (identity_verify, employment_history, bank_details, fund_iv_assignment,
+  first_payroll), STAFF (rbac_role_assign, totp_enroll, approval marker),
+  TENANT (license_evidence, capital_check, branding_config,
+  admin_provision) and NOK (identity_verify, relationship_evidence,
+  member_link). Steps complete strictly in order; EMPLOYER/STAFF/TENANT
+  require maker-checker approval (`Approve` rejects approver == submitter)
+  while person-facing pipelines auto-approve to ACTIVE. The thread-safe
+  in-memory `Store` appends every mutation to the hash-chained audit store
+  (SC-02). Full table-driven tests cover every pipeline, out-of-order /
+  unknown / duplicate / optional-step rejections, maker-checker
+  violations, auto-approve vs gated flows and audit-chain integrity.
+- `cmd/member-svc` — `POST /api/v1/onboarding`,
+  `GET /api/v1/onboarding/{id}`, `POST /api/v1/onboarding/{id}/steps/{step}`,
+  `POST /api/v1/onboarding/{id}/approve`, `POST .../reject`. KYC steps run
+  through the existing kyc facade (NIN/BVN verify, NDPA consent, PAD
+  liveness); on ACTIVE a MEMBER case provisions the member via the
+  create-member internals (registry + ledger accounts), MICRO_MEMBER opens
+  a micro-pension account, RETIREE registers in the retiree register. All
+  five routes are in `api/openapi.yaml` (contract test stays green).
+- `cmd/employer-portal` — `POST /v1/employers` now opens an EMPLOYER
+  onboarding case instead of a bare create; the employer starts PENDING
+  and becomes COMPLIANT only when the case reaches ACTIVE (GLIP 3x
+  emolument evidence validated via `internal/employer`, plus maker-checker
+  approval at `/v1/employers/{id}/approve`).
+- `cmd/identity` — `POST /v1/tenants` opens a TENANT case (PenCom licence
+  evidence + capital adequacy via `internal/capital`); the tenant is
+  provisioned only after approval. `POST /v1/staff` opens a STAFF case
+  with a login-disabled account; the `totp_enroll` step enrolls MFA
+  (RFC 6238) and approval enables login (`authn.SetDisabled`,
+  `ErrAccountDisabled`).
+- `scripts/e2e-onboarding.sh` — full-lifecycle curl harness against the
+  built binaries: member (5 steps → ACTIVE → balance works), employer
+  (GLIP 3x gate, same-approver 403, distinct-approver approval →
+  COMPLIANT), staff (pre-approval login blocked, TOTP enroll → approve →
+  TOTP login works).
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);

@@ -19,11 +19,12 @@ import (
 )
 
 var (
-	ErrBadCredentials = errors.New("authn: invalid credentials")
-	ErrMFARequired    = errors.New("authn: MFA code required")
-	ErrBadMFA         = errors.New("authn: invalid TOTP code")
-	ErrForbidden      = errors.New("authn: insufficient role")
-	ErrBadToken       = errors.New("authn: invalid token")
+	ErrBadCredentials  = errors.New("authn: invalid credentials")
+	ErrMFARequired     = errors.New("authn: MFA code required")
+	ErrBadMFA          = errors.New("authn: invalid TOTP code")
+	ErrForbidden       = errors.New("authn: insufficient role")
+	ErrBadToken        = errors.New("authn: invalid token")
+	ErrAccountDisabled = errors.New("authn: account disabled pending onboarding approval")
 )
 
 type Role string
@@ -38,14 +39,17 @@ const (
 )
 
 type Account struct {
-	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
-	Email       string    `json:"email"`
-	PassHash    string    `json:"-"`
-	Roles       []Role    `json:"roles"`
-	TOTPSecret  string    `json:"-"`
-	MFAEnrolled bool      `json:"mfa_enrolled"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string `json:"id"`
+	TenantID    string `json:"tenant_id"`
+	Email       string `json:"email"`
+	PassHash    string `json:"-"`
+	Roles       []Role `json:"roles"`
+	TOTPSecret  string `json:"-"`
+	MFAEnrolled bool   `json:"mfa_enrolled"`
+	// Disabled gates login until the staff onboarding case (FR-520) is
+	// approved; existing flows create enabled accounts (zero value).
+	Disabled  bool      `json:"disabled"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Service struct {
@@ -103,6 +107,19 @@ func (s *Service) EnrollMFA(email string) (string, error) {
 	return a.TOTPSecret, nil
 }
 
+// SetDisabled toggles the login gate (FR-520 staff onboarding: the account
+// is created disabled and activated when the onboarding case is approved).
+func (s *Service) SetDisabled(email string, disabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.accounts[email]
+	if !ok {
+		return ErrBadCredentials
+	}
+	a.Disabled = disabled
+	return nil
+}
+
 // TOTP computes the 6-digit code for a secret at a time (RFC 6238, SHA-1, 30s).
 func TOTP(secretB32 string, at time.Time) (string, error) {
 	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secretB32))
@@ -127,6 +144,9 @@ func (s *Service) Login(email, password, totpCode string, now time.Time) (string
 	s.mu.Unlock()
 	if !ok || a.PassHash != hashPassword(password, s.IDSalt()) {
 		return "", ErrBadCredentials
+	}
+	if a.Disabled {
+		return "", ErrAccountDisabled
 	}
 	if a.MFAEnrolled {
 		if totpCode == "" {

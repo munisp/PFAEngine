@@ -252,6 +252,26 @@ theme.json, and works offline: cache-first static shell, network-first
 indicator, plus an offline fallback page. `npm run build`
 (tsc -b && vite build) verified; dist/ committed under apps/member-pwa.
 
+## Tranche 13 delivered — unified onboarding framework (FR-520)
+
+One onboarding state machine now serves every stakeholder.
+`internal/onboarding` provides the DRAFT → DOCS_PENDING → KYC_PENDING →
+APPROVAL_PENDING → ACTIVE | REJECTED | SUSPENDED lifecycle with
+per-stakeholder ordered pipelines (MEMBER, MICRO_MEMBER, EMPLOYER,
+RETIREE, STAFF, TENANT, NOK), maker-checker approval for
+EMPLOYER/STAFF/TENANT (auto-approve for person-facing pipelines), and
+audit-chain appends on every mutation (SC-02). member-svc exposes the
+person-facing API (`/api/v1/onboarding*`, OpenAPI-documented and
+contract-tested) with KYC steps running through the kyc facade and
+activation hooks provisioning members, micro-pension accounts and retiree
+register entries; employer-portal routes registration through the
+EMPLOYER pipeline (GLIP 3x evidence + approval gate COMPLIANT status);
+identity routes tenant and staff provisioning through TENANT/STAFF
+pipelines (licence evidence, capital adequacy via internal/capital, TOTP
+enrollment, login disabled until approval via authn.SetDisabled).
+`scripts/e2e-onboarding.sh` drives member, employer and staff lifecycles
+against the built binaries — PASS.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the

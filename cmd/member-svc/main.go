@@ -27,7 +27,9 @@ import (
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/member"
+	"github.com/munisp/pfaengine/internal/micropension"
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/retiree"
@@ -45,25 +47,38 @@ type deps struct {
 	retirees *retiree.Register
 	prefs    *prefs.Store
 	alive    *aliveTracker
+	// onb is the unified onboarding case store (FR-520); onbPayloads holds
+	// the per-case submission payloads the step handlers and activation
+	// hooks need, and micro holds the micro-pension accounts opened for
+	// MICRO_MEMBER cases.
+	onb         *onboarding.Store
+	onbMu       sync.Mutex
+	onbPayloads map[string]onboardPayload
+	microMu     sync.Mutex
+	micro       map[string]*micropension.Account
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
 
 func main() {
 	salt := httpsrv.Getenv("KYC_HASH_SALT", "dev-salt-change-me")
+	aud := audit.NewStore()
 	d := &deps{
 		kyc: kyc.NewService(salt,
 			kyc.MockProvider{ProviderName: "mock-nimc"},
 			kyc.MockProvider{ProviderName: "mock-dojah"}),
-		members:    member.NewRegistry(),
-		ledger:     ledger.New(),
-		recon:      recon.NewEngine(),
-		audit:      audit.NewStore(),
-		authn:      authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
-		retirees:   retiree.NewRegister(),
-		prefs:      prefs.NewStore(),
-		alive:      newAliveTracker(),
-		stmtSecret: []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
+		members:     member.NewRegistry(),
+		ledger:      ledger.New(),
+		recon:       recon.NewEngine(),
+		audit:       aud,
+		authn:       authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
+		retirees:    retiree.NewRegister(),
+		prefs:       prefs.NewStore(),
+		alive:       newAliveTracker(),
+		onb:         onboarding.NewStore(aud),
+		onbPayloads: map[string]onboardPayload{},
+		micro:       map[string]*micropension.Account{},
+		stmtSecret:  []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
 	log.Fatal(srv.Run())
@@ -90,6 +105,11 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/contributions/upload", func(d *deps) http.HandlerFunc { return d.uploadContributions }},
 	{"GET", "/api/v1/recon/exceptions", func(d *deps) http.HandlerFunc { return d.exceptions }},
 	{"POST", "/api/v1/recon/exceptions/{id}/resolve", func(d *deps) http.HandlerFunc { return d.resolveException }},
+	{"POST", "/api/v1/onboarding", func(d *deps) http.HandlerFunc { return d.createOnboardingCase }},
+	{"GET", "/api/v1/onboarding/{id}", func(d *deps) http.HandlerFunc { return d.getOnboardingCase }},
+	{"POST", "/api/v1/onboarding/{id}/steps/{step}", func(d *deps) http.HandlerFunc { return d.completeOnboardingStep }},
+	{"POST", "/api/v1/onboarding/{id}/approve", func(d *deps) http.HandlerFunc { return d.approveOnboarding }},
+	{"POST", "/api/v1/onboarding/{id}/reject", func(d *deps) http.HandlerFunc { return d.rejectOnboarding }},
 	{"GET", "/api/v1/audit/export", func(d *deps) http.HandlerFunc { return d.auditExport }},
 }
 
@@ -164,8 +184,7 @@ func (d *deps) createMember(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ledger accounts: one custody-cash asset per tenant, one RSA liability
 	// per member (ErrAccountExist ignored — idempotent account creation).
-	_ = d.ledger.OpenAccount(ledger.Account{ID: "custody-cash", TenantID: tenant, Name: "Custody Cash", Type: ledger.Asset, Currency: "NGN"})
-	_ = d.ledger.OpenAccount(ledger.Account{ID: rsaAccount(p.ID), TenantID: tenant, Name: "RSA " + p.ID, Type: ledger.Liability, Currency: "NGN"})
+	d.openMemberAccounts(tenant, p.ID)
 
 	d.audit.Append(audit.Record{TenantID: tenant, Actor: "member-svc", Action: "member.onboarded", EntityType: "person", EntityID: p.ID, After: map[string]any{"nin_token": ninRec.Token != "", "bvn": bvnVerified}})
 	out := map[string]any{
@@ -659,6 +678,15 @@ func parseAmount(s string) (money.Kobo, error) {
 }
 
 func rsaAccount(memberID string) string { return "member-rsa:" + memberID }
+
+// openMemberAccounts opens the tenant custody-cash asset account and the
+// member's RSA liability account (idempotent; ErrAccountExist ignored).
+// Shared by the direct create-member handler and the onboarding activation
+// hook (FR-520).
+func (d *deps) openMemberAccounts(tenant, memberID string) {
+	_ = d.ledger.OpenAccount(ledger.Account{ID: "custody-cash", TenantID: tenant, Name: "Custody Cash", Type: ledger.Asset, Currency: "NGN"})
+	_ = d.ledger.OpenAccount(ledger.Account{ID: rsaAccount(memberID), TenantID: tenant, Name: "RSA " + memberID, Type: ledger.Liability, Currency: "NGN"})
+}
 
 func rcptID(i int) string { return "rcpt-" + strconv.Itoa(i) }
 

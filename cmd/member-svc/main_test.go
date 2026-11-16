@@ -14,6 +14,8 @@ import (
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/member"
+	"github.com/munisp/pfaengine/internal/micropension"
+	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/retiree"
@@ -22,16 +24,19 @@ import (
 
 func newTestDeps() *deps {
 	return &deps{
-		kyc:        kyc.NewService("test-salt", kyc.MockProvider{ProviderName: "mock-nimc"}),
-		members:    member.NewRegistry(),
-		ledger:     ledger.New(),
-		recon:      recon.NewEngine(),
-		audit:      audit.NewStore(),
-		authn:      authn.NewService("test-signing-secret-0123456789"),
-		retirees:   retiree.NewRegister(),
-		prefs:      prefs.NewStore(),
-		alive:      newAliveTracker(),
-		stmtSecret: []byte("test-statement-secret"),
+		kyc:         kyc.NewService("test-salt", kyc.MockProvider{ProviderName: "mock-nimc"}),
+		members:     member.NewRegistry(),
+		ledger:      ledger.New(),
+		recon:       recon.NewEngine(),
+		audit:       audit.NewStore(),
+		authn:       authn.NewService("test-signing-secret-0123456789"),
+		retirees:    retiree.NewRegister(),
+		prefs:       prefs.NewStore(),
+		alive:       newAliveTracker(),
+		onb:         onboarding.NewStore(audit.NewStore()),
+		onbPayloads: map[string]onboardPayload{},
+		micro:       map[string]*micropension.Account{},
+		stmtSecret:  []byte("test-statement-secret"),
 	}
 }
 

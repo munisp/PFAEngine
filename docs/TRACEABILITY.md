@@ -124,3 +124,9 @@ spec's FR-501..503.
 | Req | Implementation | Status |
 |---|---|---|
 | INT-07 WhatsApp channel (Meta Cloud API) | `internal/vendors/whatsapp.go` (SendTemplate/SendText with Bearer auth, VerifyWebhookSignature HMAC-SHA256 constant-time, VerifyChallenge handshake, ParseInbound); `chatbot.Responder.HandleWhatsApp` bridge; `cmd/notification` `/webhooks/whatsapp` GET/POST gated by the `whatsapp` tenant feature flag; `notify.Service.SendWhatsApp` hook wires WHATSAPP-channel templates to the adapter | Implemented |
+
+## Tranche 13
+
+| Req | Implementation | Status |
+|---|---|---|
+| FR-520 unified onboarding framework | `internal/onboarding` (Case state machine DRAFT→DOCS_PENDING→KYC_PENDING→APPROVAL_PENDING→ACTIVE/REJECTED/SUSPENDED; per-stakeholder `Pipeline` templates for MEMBER/MICRO_MEMBER/EMPLOYER/RETIREE/STAFF/TENANT/NOK; maker-checker Approve/Reject; audit-chained mutations); `cmd/member-svc` `/api/v1/onboarding*` (KYC facade-backed steps, activation hooks); `cmd/employer-portal` EMPLOYER pipeline gating COMPLIANT (GLIP 3x); `cmd/identity` TENANT (licence + `capital.Assess`) and STAFF (TOTP enroll, login disabled until approval) pipelines; `scripts/e2e-onboarding.sh` | Implemented |
