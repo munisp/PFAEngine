@@ -7,10 +7,19 @@ import (
 
 	"github.com/munisp/pfaengine/internal/appx"
 	"github.com/munisp/pfaengine/internal/notify"
+	"github.com/munisp/pfaengine/internal/vendors"
+	"os"
 )
 
 func main() {
-	svc := notify.NewService(&notify.MockSender{})
+	var sender notify.Sender = &notify.MockSender{}
+	if os.Getenv("TERMII_API_KEY") != "" { // INT-07
+		sender = &vendors.Termii{
+			APIKey: os.Getenv("TERMII_API_KEY"), SenderID: appx.Env("TERMII_SENDER_ID", "PFAEngine"),
+			BaseURL: appx.Env("TERMII_BASE_URL", "https://v3.api.termii.com"),
+		}
+	}
+	svc := notify.NewService(sender)
 	svc.RegisterTemplate(notify.Template{ID: "contrib-received", Channel: notify.SMS, Name: "Contribution received", Body: "Dear {{name}}, your RSA received NGN {{amount}} for {{period}}.", Version: 1})
 	svc.RegisterTemplate(notify.Template{ID: "liveness-reminder", Channel: notify.WhatsApp, Name: "I Am Alive reminder", Body: "Dear {{name}}, your annual liveness verification is due. Open the app to verify.", Version: 1})
 

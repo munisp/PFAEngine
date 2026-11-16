@@ -8,11 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"context"
 	"github.com/munisp/pfaengine/internal/appx"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/contribution"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/store"
+	"log"
+	"os"
 )
 
 type state struct {
@@ -26,6 +30,15 @@ type state struct {
 func main() {
 	st := &state{scheds: map[string]*contribution.Schedule{}, ledger: ledger.New(), history: map[string][]contribution.Line{}}
 	aud := audit.NewStore()
+	var pg *store.DB // NFR-10: Postgres persistence when DATABASE_URL is set
+	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
+		db, err := store.Open(context.Background(), dsn)
+		if err != nil {
+			log.Fatalf("[contribution] database: %v", err)
+		}
+		pg = db
+		log.Printf("[contribution] PostgreSQL persistence enabled")
+	}
 	validatePIN := func(pin string) bool { return len(pin) >= 6 } // PenCom PCRS PIN check adapter (INT-01)
 
 	mux := http.NewServeMux()
@@ -49,6 +62,12 @@ func main() {
 		sched.ID = "sched-" + itoa(st.seq)
 		st.scheds[sched.ID] = sched
 		st.mu.Unlock()
+		if pg != nil {
+			if perr := pg.InsertScheduleWithLines(r.Context(), sched); perr != nil {
+				appx.Err(w, 500, "PERSIST_FAILED", perr)
+				return
+			}
+		}
 		aud.Append(audit.Record{TenantID: appx.TenantOf(r), Actor: appx.Path(r, "id"), Action: "contribution.scheduled", EntityType: "schedule", EntityID: sched.ID, After: map[string]any{"lines": len(sched.Lines), "status": sched.Status}})
 		if err != nil {
 			appx.JSON(w, 422, sched) // validation errors surfaced with detail
@@ -91,6 +110,9 @@ func main() {
 		}
 		sched.Status = contribution.SchedPosted
 		sched.PostedAt = time.Now().UTC()
+		if pg != nil {
+			_ = pg.MarkSchedulePosted(r.Context(), sched.ID)
+		}
 		appx.JSON(w, 200, map[string]any{"schedule_id": sched.ID, "posted_lines": posted, "total_kobo": sched.Total(), "status": sched.Status})
 	})
 

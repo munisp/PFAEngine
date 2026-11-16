@@ -64,17 +64,23 @@ curl -X POST localhost:8084/v1/employers/emp-1/schedules?period=2026-11 \
 (Nigeria DC Fund II, DB final-salary, CARE hybrid, Sharia) bit-for-bit.
 Any rules-engine change that alters these numbers fails CI.
 
-## Honest caveats (v1 scope)
+## Production toggles (v2)
 
-- Services run with in-memory stores by default; PostgreSQL wiring uses
-  `db/migrations/0001_init.sql` (repository adapters are the next tranche).
-- KYC/payment/USSD providers are mock adapters behind the production
-  interfaces (INT-02..08) — swap in Smile ID/Dojah/Remita credentials.
+| Env var | Effect |
+|---|---|
+| `DATABASE_URL` | Services persist to PostgreSQL (`internal/store`) |
+| `KAFKA_BROKERS` | Event backbone binds to Kafka (`internal/stream`) |
+| `SMILEID_API_KEY` / `DOJAH_SECRET_KEY` | Real KYC aggregators (`internal/vendors`) |
+| `TERMII_API_KEY` | Real SMS delivery via Termii |
+| `REMITA_*` | Employer remittance instructions via Remita |
+
+## Honest caveats (v2 scope)
+
 - Flutter member app and React web portal are not in this repo yet;
   API contracts are ready in `api/openapi.yaml`.
-- Temporal workflows are defined by the state machines in
-  `internal/transfer` / `internal/benefit`; durable-worker binding is the
-  Phase 2 hardening step.
+- Temporal durable-worker binding wraps the transfer/benefit state
+  machines next (state machines are complete and tested).
+- Remaining Postgres repos: reporting/statement/transfer persistence.
 
 See `docs/TRACEABILITY.md` for requirement-ID → code mapping and
 `docs/COMPLETION.md` for the completion score.

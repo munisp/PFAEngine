@@ -8,12 +8,31 @@ import (
 	"github.com/munisp/pfaengine/internal/appx"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/kyc"
+	"github.com/munisp/pfaengine/internal/vendors"
+	"os"
 )
 
 func main() {
-	svc := kyc.NewService(appx.Env("KYC_HASH_SALT", "dev-kyc-salt"),
-		kyc.MockProvider{ProviderName: appx.Env("KYC_PROVIDER_A", "smileid")},
-		kyc.MockProvider{ProviderName: appx.Env("KYC_PROVIDER_B", "dojah")})
+	// INT-02: >=2 contracted aggregators from day one. Real adapters when
+	// credentials are present; deterministic mocks otherwise (dev/test).
+	providers := []kyc.Provider{}
+	if os.Getenv("SMILEID_API_KEY") != "" {
+		providers = append(providers, &vendors.SmileID{
+			PartnerID: os.Getenv("SMILEID_PARTNER_ID"), APIKey: os.Getenv("SMILEID_API_KEY"),
+			BaseURL: appx.Env("SMILEID_BASE_URL", "https://api.smileidentity.com/v2"),
+		})
+	} else {
+		providers = append(providers, kyc.MockProvider{ProviderName: appx.Env("KYC_PROVIDER_A", "smileid")})
+	}
+	if os.Getenv("DOJAH_SECRET_KEY") != "" {
+		providers = append(providers, &vendors.Dojah{
+			AppID: os.Getenv("DOJAH_APP_ID"), SecretKey: os.Getenv("DOJAH_SECRET_KEY"),
+			BaseURL: appx.Env("DOJAH_BASE_URL", "https://api.dojah.io"),
+		})
+	} else {
+		providers = append(providers, kyc.MockProvider{ProviderName: appx.Env("KYC_PROVIDER_B", "dojah")})
+	}
+	svc := kyc.NewService(appx.Env("KYC_HASH_SALT", "dev-kyc-salt"), providers...)
 	aud := audit.NewStore()
 
 	mux := http.NewServeMux()
