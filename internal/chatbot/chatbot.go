@@ -19,6 +19,15 @@ const (
 	IntentStatement
 	IntentIAmAlive
 	IntentTransferStatus
+	// Tranche 19: innovation intents (member-facing innovation engines
+	// surface through chatbot + WhatsApp + USSD parity).
+	IntentProjection // advisory: retirement projection
+	IntentGrow       // escalation + roundup: increase savings
+	IntentFundChoice // glidepath: fund I-IV election
+	IntentMortgage   // 25% RSA mortgage equity (PRA s.89(2))
+	IntentClaims     // claimsfast: retirement claims
+	IntentNominee    // succession: beneficiary nominations
+	IntentLearn      // literacy centre
 	IntentUnknown
 )
 
@@ -29,6 +38,13 @@ var intentKey = map[Intent]string{
 	IntentStatement:        "chat.statement",
 	IntentIAmAlive:         "chat.i_am_alive",
 	IntentTransferStatus:   "chat.transfer_status",
+	IntentProjection:       "chat.projection",
+	IntentGrow:             "chat.grow",
+	IntentFundChoice:       "chat.fund_choice",
+	IntentMortgage:         "chat.mortgage",
+	IntentClaims:           "chat.claims",
+	IntentNominee:          "chat.nominee",
+	IntentLearn:            "chat.learn",
 	IntentUnknown:          "chat.unknown",
 }
 
@@ -52,6 +68,13 @@ var rules = []keywordRule{
 	{IntentStatement, []string{"statement", "e-statement"}},
 	{IntentIAmAlive, []string{"i am alive", "dey alive", "liveness", "alive"}},
 	{IntentTransferStatus, []string{"transfer", "moving my rsa", "switch pfa"}},
+	{IntentProjection, []string{"retirement projection", "how much i go get", "project my pension", "retire with", "projection"}},
+	{IntentGrow, []string{"increase my contribution", "round up", "roundup", "grow my pension", "save more", "step up"}},
+	{IntentFundChoice, []string{"change my fund", "fund choice", "fund ii", "fund i", "aggressive fund", "glidepath"}},
+	{IntentMortgage, []string{"mortgage", "house loan", "equity contribution", "buy house", "25%"}},
+	{IntentClaims, []string{"retirement claim", "claim my pension", "retire", "benefit claim", "withdraw my pension"}},
+	{IntentNominee, []string{"next of kin", "nominee", "beneficiary", "who go inherit"}},
+	{IntentLearn, []string{"learn about pension", "teach me", "financial literacy", "how pension work", "learn"}},
 }
 
 // Classify returns the intent for msg using longest-keyword-first
@@ -110,6 +133,20 @@ func USSDCode(i Intent) string {
 		return "4"
 	case IntentTransferStatus:
 		return "5"
+	case IntentProjection:
+		return "6"
+	case IntentGrow:
+		return "7"
+	case IntentFundChoice:
+		return "8"
+	case IntentMortgage:
+		return "9"
+	case IntentClaims:
+		return "10"
+	case IntentNominee:
+		return "11"
+	case IntentLearn:
+		return "12"
 	}
 	return ""
 }

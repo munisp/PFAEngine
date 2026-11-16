@@ -54,6 +54,55 @@ class ApiClient {
   // --- I Am Alive (FR-108) ---
   Future<Map<String, dynamic>> iAmAlive(String personId, String selfieRef) =>
       submitLiveness(personId, selfieRef, kind: 'IAM_ALIVE');
+
+  // --- Tranche 19: innovation engines (member-svc /api/v1) ---
+  Future<Map<String, dynamic>> advisoryProject(Map<String, dynamic> input) =>
+      post('/api/v1/advisory/project', input);
+
+  Future<Map<String, dynamic>> glidepathGet(String memberId) =>
+      get('/api/v1/glidepath/members?member_id=$memberId');
+
+  Future<Map<String, dynamic>> glidepathElect(String memberId, String fund) =>
+      post('/api/v1/glidepath/elect', {'member_id': memberId, 'fund': fund});
+
+  Future<Map<String, dynamic>> mortgageApply(Map<String, dynamic> input) =>
+      post('/api/v1/mortgage/applications', input);
+
+  Future<Map<String, dynamic>> mortgageList(String memberId) =>
+      get('/api/v1/mortgage/applications?member_id=$memberId');
+
+  Future<Map<String, dynamic>> claimsOpen(String rsaId) =>
+      post('/api/v1/claimsfast/packs', {'rsa_id': rsaId});
+
+  Future<Map<String, dynamic>> claimsComplete(String rsaId, String item) =>
+      post('/api/v1/claimsfast/complete', {'rsa_id': rsaId, 'item': item});
+
+  Future<Map<String, dynamic>> successionGet(String memberId) =>
+      get('/api/v1/succession/nominations?member_id=$memberId');
+
+  Future<Map<String, dynamic>> successionNominate(String memberId, List<Map<String, dynamic>> beneficiaries) =>
+      post('/api/v1/succession/nominations', {'member_id': memberId, 'beneficiaries': beneficiaries});
+
+  Future<Map<String, dynamic>> roundupWallet(String memberId) =>
+      get('/api/v1/roundup/wallets?member_id=$memberId');
+
+  Future<Map<String, dynamic>> roundupOpen(String memberId, int stepKobo, int monthlyCapKobo) =>
+      post('/api/v1/roundup/wallets', {'member_id': memberId, 'step_kobo': stepKobo, 'monthly_cap_kobo': monthlyCapKobo});
+
+  Future<Map<String, dynamic>> escalationRules(String memberId) =>
+      get('/api/v1/escalation/rules?member_id=$memberId');
+
+  Future<Map<String, dynamic>> escalationEnrol(String memberId, int baseBps, int stepBps, int maxBps) =>
+      post('/api/v1/escalation/rules', {'member_id': memberId, 'base_rate_bps': baseBps, 'step_bps': stepBps, 'max_bps': maxBps});
+
+  Future<Map<String, dynamic>> literacyCatalogue(String lang) =>
+      get('/api/v1/literacy/catalogue?lang=$lang');
+
+  Future<Map<String, dynamic>> literacyAnswer(String memberId, String lessonId, int option) =>
+      post('/api/v1/literacy/answer', {'member_id': memberId, 'lesson_id': lessonId, 'option': option});
+
+  Future<Map<String, dynamic>> diasporaContribute(String rsaId, String currency, int amountMinor) =>
+      post('/api/v1/diaspora/contributions', {'rsa_id': rsaId, 'currency': currency, 'amount_minor': amountMinor});
 }
 
 class ApiException implements Exception {

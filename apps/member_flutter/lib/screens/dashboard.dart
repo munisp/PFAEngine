@@ -1,9 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../api/client.dart';
+import 'grow.dart';
+import 'funds.dart';
+import 'claims.dart';
+import 'family.dart';
 
 /// Member dashboard: balance, transactions, QR-verifiable statement (FR-501),
 /// I-Am-Alive status (FR-108).
+Widget _navChip(BuildContext context, IconData icon, String label, Widget dest) {
+  return ActionChip(
+    avatar: Icon(icon, size: 18),
+    label: Text(label),
+    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => dest)),
+  );
+}
+
 class DashboardScreen extends StatelessWidget {
   final String tenantId;
   final String apiBase;
@@ -34,6 +46,19 @@ class DashboardScreen extends StatelessWidget {
               label: const Text('I Am Alive — verify now'),
               onPressed: () => api.iAmAlive('demo-person', 'clean-selfie'),
             ),
+            const SizedBox(height: 16),
+            const Text('Innovations', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              _navChip(context, Icons.trending_up, 'Grow',
+                  GrowScreen(api: api, memberId: 'demo-rsa')),
+              _navChip(context, Icons.account_balance, 'Funds',
+                  FundsScreen(api: api, memberId: 'demo-rsa')),
+              _navChip(context, Icons.assignment_turned_in, 'Claims',
+                  ClaimsScreen(api: api, rsaId: 'demo-rsa')),
+              _navChip(context, Icons.family_restroom, 'Family',
+                  FamilyScreen(api: api, memberId: 'demo-rsa')),
+            ]),
           ]);
         },
       ),

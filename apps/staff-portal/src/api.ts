@@ -34,6 +34,30 @@ export class Api {
   auditExport(approver1: string, approver2: string) {
     return this.req<{ count: number }>('POST', '/v1/audit/export', { approver1, approver2 });
   }
+
+  // ---- Tranche 19: innovation operations (member-svc /api/v1) ----
+  fraudCases(openOnly: boolean) {
+    return this.req<{ cases: any[] }>('GET', `/api/v1/fraud/cases${openOnly ? '?open=1' : ''}`);
+  }
+  fraudResolve(caseId: string, status: 'CONFIRMED_FRAUD' | 'CLEARED') {
+    return this.req('POST', '/api/v1/fraud/resolve', { case_id: caseId, status });
+  }
+  agentsLeaderboard() {
+    return this.req<{ leaderboard: Record<string, number> }>('GET', '/api/v1/agents/leaderboard');
+  }
+  regfileList() {
+    return this.req<{ filings: any[] }>('GET', '/api/v1/regfile/filings');
+  }
+  regfileGenerate(id: string, payload: string) {
+    return this.req('POST', '/api/v1/regfile/generate', { id, payload });
+  }
+  readinessReport(employerId: string, inputs: {
+    remittances_on_time: number; remittances_total: number;
+    employees_covered: number; employees_total: number; avg_contrib_bps: number;
+  }) {
+    const period = new Date().toISOString().slice(0, 7);
+    return this.req<any>('POST', '/api/v1/readiness/reports', { employer_id: employerId, period, inputs });
+  }
 }
 
 export const naira = (kobo: number) => (kobo / 100).toLocaleString('en-NG', { style: 'currency', currency: 'NGN' });

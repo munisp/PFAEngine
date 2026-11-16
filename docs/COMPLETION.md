@@ -431,6 +431,27 @@ penalty N40,000, ESG grade A); restart durability on persisted domains
   full go build ./... + go test ./... OK; live smoke member-svc -> ML
   service: dormant-then-large scored 81/100 flagged, normal contribution 0.
 
+## Tranche 19 — Innovation UI/UX integration (2026-11-17)
+
+The 15 T17 innovation engines were API-complete but UI-absent; T19 wires them
+into every member/staff surface:
+- **PWA (member)**: new views Grow (advisory projection + escalation enrol/opt-out
+  + round-ups), Funds (glidepath election I-IV + switch history), Home (mortgage
+  equity apply + status, live 25% cap), Claims (fast-track checklist with
+  progress bar + STP state), Family (versioned nominations, 100% share guard),
+  Learn (literacy lessons + quiz + score). Bottom-nav regrouped
+  Home/Grow/Funds/Family/More. tsc + vite build clean (281 kB gzip 86 kB).
+  api.ts typed to exact Go handler contracts (verified field-by-field).
+- **Flutter (native mobile)**: GrowScreen, FundsScreen, ClaimsScreen,
+  FamilyScreen + dashboard nav chips; ApiClient gains 15 methods. Dart
+  parse-verified via SDK 3.14 formatter (full `flutter analyze` blocked by the
+  sandbox SDK not being a git checkout — compile gate is CI).
+- **WhatsApp + chatbot + USSD**: 7 new deterministic intents (projection, grow,
+  fund choice, mortgage, claims, nominee, learn) in en + pcm-NG, USSD parity
+  codes 6-12; WhatsApp rides the same classifier via HandleWhatsApp.
+- **Staff portal**: FraudCases (queue + confirm/clear), Agents (leaderboard),
+  Compliance (regfile lifecycle + readiness index with inputs). Build clean.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the

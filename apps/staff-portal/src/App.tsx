@@ -3,6 +3,9 @@ import { Api } from './api';
 import ReconQueue from './views/ReconQueue';
 import ClaimsQueue from './views/ClaimsQueue';
 import AuditExport from './views/AuditExport';
+import FraudCases from './views/FraudCases';
+import Agents from './views/Agents';
+import Compliance from './views/Compliance';
 
 // Staff operations portal: reconciliation exceptions, claims maker-checker,
 // audit export (dual control) — the compliance cockpit (BR-09, FR-502).
@@ -12,7 +15,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [token, setToken] = useState<string>();
-  const [view, setView] = useState<'recon' | 'claims' | 'audit'>('recon');
+  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance'>('recon');
   const [error, setError] = useState('');
 
   const api = new Api(import.meta.env.VITE_API_BASE ?? 'http://localhost:8080', tenantId, token);
@@ -53,11 +56,17 @@ export default function App() {
           <button onClick={() => setView('recon')}>Reconciliation</button>
           <button onClick={() => setView('claims')}>Claims</button>
           <button onClick={() => setView('audit')}>Audit export</button>
+          <button onClick={() => setView('fraud')}>Fraud cases</button>
+          <button onClick={() => setView('agents')}>Agents</button>
+          <button onClick={() => setView('compliance')}>Compliance</button>
         </nav>
       </header>
       {view === 'recon' && <ReconQueue api={api} />}
       {view === 'claims' && <ClaimsQueue api={api} />}
       {view === 'audit' && <AuditExport api={api} />}
+      {view === 'fraud' && <FraudCases api={api} />}
+      {view === 'agents' && <Agents api={api} />}
+      {view === 'compliance' && <Compliance api={api} />}
     </main>
   );
 }

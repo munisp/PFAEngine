@@ -6,11 +6,18 @@ import type { Session } from './session'
 import { clearSession, loadSession, saveSession } from './session'
 import { applyTheme, DEFAULT_THEME, loadTheme } from './theme'
 import Alive from './views/Alive'
+import Claims from './views/Claims'
 import Dashboard from './views/Dashboard'
+import Family from './views/Family'
+import Funds from './views/Funds'
+import Grow from './views/Grow'
+import Home from './views/Home'
+import Learn from './views/Learn'
 import Login from './views/Login'
 import Statement from './views/Statement'
 
-type View = 'dashboard' | 'statement' | 'alive'
+type View = 'dashboard' | 'grow' | 'funds' | 'family' | 'more'
+  | 'statement' | 'alive' | 'claims' | 'home' | 'learn'
 
 const LOCALE_KEY = 'pfa.locale'
 
@@ -48,8 +55,18 @@ export default function App() {
 
   const navItems: { id: View; key: string }[] = [
     { id: 'dashboard', key: 'nav.dashboard' },
+    { id: 'grow', key: 'nav.grow' },
+    { id: 'funds', key: 'nav.funds' },
+    { id: 'family', key: 'nav.family' },
+    { id: 'more', key: 'nav.more' },
+  ]
+
+  const moreItems: { id: View; key: string }[] = [
     { id: 'statement', key: 'nav.statement' },
     { id: 'alive', key: 'nav.alive' },
+    { id: 'claims', key: 'nav.claims' },
+    { id: 'home', key: 'nav.home' },
+    { id: 'learn', key: 'nav.learn' },
   ]
 
   return (
@@ -77,8 +94,30 @@ export default function App() {
       ) : (
         <>
           {view === 'dashboard' && <Dashboard api={api} session={session} locale={locale} />}
+          {view === 'grow' && <Grow api={api} session={session} locale={locale} />}
+          {view === 'funds' && <Funds api={api} session={session} locale={locale} />}
+          {view === 'family' && <Family api={api} session={session} locale={locale} />}
           {view === 'statement' && <Statement api={api} session={session} locale={locale} />}
           {view === 'alive' && <Alive api={api} session={session} locale={locale} />}
+          {view === 'claims' && <Claims api={api} session={session} locale={locale} />}
+          {view === 'home' && <Home api={api} session={session} locale={locale} />}
+          {view === 'learn' && <Learn api={api} session={session} locale={locale} />}
+          {view === 'more' && (
+            <main className="view">
+              <h2>{t(locale, 'nav.more')}</h2>
+              <section className="card">
+                <ul className="lesson-list">
+                  {moreItems.map((m) => (
+                    <li key={m.id}>
+                      <button type="button" className="ghost" onClick={() => setView(m.id)}>
+                        {t(locale, m.key)}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            </main>
+          )}
           <button className="ghost" type="button" onClick={signOut}>
             {t(locale, 'session.sign_out')}
           </button>
@@ -91,7 +130,7 @@ export default function App() {
               <button
                 key={item.id}
                 type="button"
-                className={item.id === view ? 'active' : ''}
+                className={item.id === view || (item.id === 'more' && moreItems.some((m) => m.id === view)) ? 'active' : ''}
                 onClick={() => setView(item.id)}
               >
                 {t(locale, item.key)}
