@@ -1,0 +1,44 @@
+[
+  {
+    "uri": "rules://ng/pencom/contrib-8-10@PRA2014-s4",
+    "jurisdiction": "NG", "kind": "contrib-split",
+    "version": "PRA2014-s4", "effective_from": "2014-07-01",
+    "params": {"employee_pct": 8, "employer_pct": 10}
+  },
+  {
+    "uri": "assump/retire-proj@2026-11",
+    "jurisdiction": "NG", "kind": "retire-projection",
+    "version": "2026-11", "effective_from": "2026-11-01",
+    "params": {"growth_pct_per_year": 5, "return_pct_per_year": 9}
+  },
+  {
+    "uri": "rules://ng/pencom/benefit-splits@PRA2014-s7",
+    "jurisdiction": "NG", "kind": "benefit-split",
+    "version": "PRA2014-s7", "effective_from": "2014-07-01",
+    "params": {"tax_free_cash_pct": 25}
+  },
+  {
+    "uri": "rules://generic/db-fs/1-60@2026-11",
+    "jurisdiction": "ANY", "kind": "db-accrual",
+    "version": "2026-11", "effective_from": "2026-11-01",
+    "params": {"accrual_numerator": 1, "accrual_denominator": 60}
+  },
+  {
+    "uri": "rules://generic/db-fs/early-factors@2026-11",
+    "jurisdiction": "ANY", "kind": "early-factor",
+    "version": "2026-11", "effective_from": "2026-11-01",
+    "params": {"factors": {"1": 950, "2": 910, "3": 850, "4": 800, "5": 750}}
+  },
+  {
+    "uri": "rules://generic/db-care/2.5@2026-11",
+    "jurisdiction": "ANY", "kind": "care-reval",
+    "version": "2026-11", "effective_from": "2026-11-01",
+    "params": {"accrual_pct_mille": 25, "reval_pct_per_year": 6}
+  },
+  {
+    "uri": "rules://sharia/profit-participation@board-2026-09",
+    "jurisdiction": "ANY", "kind": "sharia-pack",
+    "version": "board-2026-09", "effective_from": "2026-09-01",
+    "params": {"profit_share_pct": 6, "purification_mille": 18, "zakat_pct_mille": 25}
+  }
+]

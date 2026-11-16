@@ -1,0 +1,167 @@
+openapi: 3.0.3
+info:
+  title: PFAEngine — PFA-as-a-Service API
+  version: 1.0.0
+  description: |
+    Multi-tenant pension fund administration API (Architecture Report §6).
+    REST/JSON over the gateway; OAuth2 client-credentials for partners,
+    OIDC for users; all endpoints tenant-scoped via X-Tenant-ID (dev) or
+    tenant subdomain claim (production). Webhooks for async outcomes.
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/members:
+    post:
+      summary: Create member profile; returns person_id; triggers KYC workflow
+      tags: [Onboarding & KYC]
+      responses: { '201': { description: Created } }
+  /v1/kyc/nin/verify:
+    post:
+      summary: NIN verification via NIMC-licensed aggregator (tokenized)
+      tags: [Onboarding & KYC]
+      responses: { '200': { description: Verified } }
+  /v1/kyc/bvn/verify:
+    post:
+      summary: BVN validation via NIBSS (name/DOB/phone match; hash-only persistence)
+      tags: [Onboarding & KYC]
+      responses: { '200': { description: Validated } }
+  /v1/kyc/liveness:
+    post:
+      summary: Submit selfie-liveness + face-match job (ENROLL or IAM_ALIVE)
+      tags: [Onboarding & KYC]
+      responses: { '200': { description: Result with status/score } }
+  /v1/kyc/liveness/{id}:
+    get:
+      summary: Poll verification status/score
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Status } }
+  /v1/members/{id}/rsa:
+    post:
+      summary: Open RSA; picks fund; requests PenCom PIN; emits rsa.opened
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '201': { description: RSA opened } }
+  /v1/consents:
+    post:
+      summary: NDPA consent capture per purpose with wording version
+      tags: [Onboarding & KYC]
+      responses: { '201': { description: Recorded } }
+    get:
+      summary: Retrieve consents per data subject
+      tags: [Onboarding & KYC]
+      responses: { '200': { description: Consents } }
+  /v1/employers:
+    post:
+      summary: Register employer (RC number, contacts, remittance terms)
+      tags: [Contributions & Employers]
+      responses: { '201': { description: Registered } }
+  /v1/employers/{id}/schedules:
+    post:
+      summary: Upload contribution schedule (CSV/XLSX or JSON) with PIN validation
+      tags: [Contributions & Employers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '201': { description: Validated }, '422': { description: Validation errors } }
+  /v1/contributions:
+    post:
+      summary: Post approved schedule to member accounts (cash P1; units P2)
+      tags: [Contributions & Employers]
+      responses: { '200': { description: Posted } }
+  /v1/reconciliation/exceptions:
+    get:
+      summary: List unmatched remittances/suspense items with aging
+      tags: [Reconciliation]
+      responses: { '200': { description: Exceptions } }
+  /v1/reconciliation/{id}/resolve:
+    post:
+      summary: Resolve exception (auto-match, reclassify, refund)
+      tags: [Reconciliation]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Resolved } }
+  /v1/members/{id}/contributions:
+    get:
+      summary: Member contribution history
+      tags: [Contributions & Employers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: History } }
+  /v1/members/{id}/statement.pdf:
+    get:
+      summary: On-demand QR-verifiable statement PDF (<5s)
+      tags: [Statements & Reporting]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: PDF, content: { application/pdf: {} } } }
+  /v1/statements/schedules:
+    post:
+      summary: Recurring e-delivery schedules (quarterly default)
+      tags: [Statements & Reporting]
+      responses: { '201': { description: Scheduled } }
+  /v1/reports/{return_code}:
+    get:
+      summary: Generate statutory return (quarterly/annual packs)
+      tags: [Statements & Reporting]
+      parameters:
+        - { name: return_code, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Return draft } }
+  /v1/audit/export:
+    post:
+      summary: Export hash-chained audit slice (staff-only, dual control)
+      tags: [Statements & Reporting]
+      responses: { '200': { description: Export }, '403': { description: Dual control required } }
+  /v1/claims:
+    post:
+      summary: Benefit application (lump sum, programmed withdrawal, annuity handoff, invalidity, death)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Submitted } }
+  /v1/claims/{id}/decision:
+    post:
+      summary: Approval/rejection with maker-checker
+      tags: [Benefits & Transfers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Decided } }
+  /v1/transfers:
+    post:
+      summary: Initiate RSA transfer (one per 365 days; PenCom RTS sync)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Initiated }, '422': { description: 365-day rule } }
+  /v1/funds/{id}/nav:
+    get:
+      summary: Query daily NAV per fund
+      tags: [Funds]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: NAV } }
+    post:
+      summary: Publish daily NAV per fund
+      tags: [Funds]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Published } }
+  /v1/retirees/liveness:
+    post:
+      summary: '"I Am Alive" annual verification (reuses KYC liveness engine, IAM_ALIVE kind)'
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: Verified } }
+  /v1/webhooks:
+    post:
+      summary: Register signed webhook endpoint (kyc.verified, contribution.posted, claim.decided, transfer.state.changed)
+      tags: [Partner APIs]
+      responses: { '201': { description: Registered } }
+components:
+  securitySchemes:
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: X-Tenant-ID
+    bearerAuth:
+      type: http
+      scheme: bearer
+security:
+  - tenantHeader: []
+    bearerAuth: []

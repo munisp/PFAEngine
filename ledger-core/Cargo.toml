@@ -1,0 +1,7 @@
+[package]
+name = "ledger-core"
+version = "0.1.0"
+edition = "2021"
+description = "PFAEngine ledger hot path — deterministic double-entry postings (Rust mirror of internal/ledger)"
+
+[dependencies]
