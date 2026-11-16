@@ -28,9 +28,19 @@ docs/                traceability matrix and completion report
 
 ```bash
 go test ./...            # all domain logic incl. golden rule tests
-go build ./...           # 15 services
+go build ./...           # 16 services
 (cd ledger-core && cargo test)   # Rust hot path
 docker compose -f deploy/docker-compose.yml up   # full stack
+```
+
+## Run locally (no Docker)
+
+```bash
+sh scripts/bootstrap-toolchain.sh   # restores Go/Rust toolchains (idempotent)
+sh scripts/smoke.sh                 # builds api-gateway + member-svc, exercises
+                                    # onboarding -> contribution -> balance -> recon,
+                                    # probes, tenant enforcement, graceful shutdown
+sh scripts/verify-dockerfile.sh     # static Dockerfile hardening checks
 ```
 
 Dev-mode example (single service):
@@ -139,6 +149,33 @@ Any rules-engine change that alters these numbers fails CI.
   requires all six capabilities (3-node replication, failover drill,
   backup-restore drill, 72h soak test, dual-control export, ledger
   replay parity) with evidence; Postgres stays the default ledger.
+
+## Tranche 8: production hardening
+
+- `internal/httpsrv`: shared HTTP service layer — `/healthz` liveness
+  (always 200), `/readyz` readiness via a `Ready` hook, graceful shutdown
+  on SIGTERM/SIGINT with a 10s drain, the `{error, code}` JSON error
+  envelope, request-ID propagation (`X-Request-ID`), tenant middleware
+  (`X-Tenant-ID`, 400 when missing), and an authn-backed bearer-token
+  middleware hook (tokens are only issued after password + TOTP).
+- `cmd/api-gateway`: path-prefix reverse-proxy routing (`/api/v1/members`
+  → member service, `/api/v1/contributions`, `/api/v1/recon`, …) with
+  env-driven service discovery (`MEMBER_SERVICE_URL`, …) and aggregated
+  readiness across all configured backends; upstream failures surface as
+  502 in the canonical envelope.
+- `cmd/member-svc`: hardened member service wiring the domain packages
+  over HTTP — KYC-gated onboarding (`kyc.VerifyNIN`/`ValidateBVN`),
+  `GET /api/v1/members/{id}/balance` from the ledger, CSV contribution
+  upload (`contribution.ParseCSV` → `recon.Engine` → ledger post), and
+  the recon exception queue.
+- `deploy/Dockerfile`: multi-stage `golang:1.23` → `alpine:3.20`,
+  CGO-free static build, non-root user, `EXPOSE 8080`, `/healthz`
+  healthcheck, one `SERVICE` build arg for every binary;
+  `scripts/verify-dockerfile.sh` statically asserts the hardening.
+- `scripts/smoke.sh`: self-contained end-to-end smoke (build → start →
+  probes → onboard → upload → balance → recon → SIGTERM drain).
+- `.github/workflows/ci.yml`: Go 1.23 build/vet/test + gofmt gate, Rust
+  `cargo test` for ledger-core, Dockerfile static checks.
 
 ## Honest caveats (v3 scope)
 

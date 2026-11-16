@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -112,8 +113,11 @@ func TestTranche6RoundTrip(t *testing.T) {
 	}
 	defer db.Close()
 
-	tenant, memberID := "t6", "member-t6-1"
-	m := MemberRow{ID: memberID, PIN: "PEN600", NINHash: "nin-h", BVNHash: "bvn-h", Status: "ACTIVE", FundCode: "FUND_II"}
+	// Unique run suffix keeps the integration test idempotent across
+	// repeated runs against a persistent database.
+	run := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenant, memberID := "t6-"+run, "member-t6-"+run
+	m := MemberRow{ID: memberID, PIN: "PEN6" + run, NINHash: "nin-h", BVNHash: "bvn-h", Status: "ACTIVE", FundCode: "FUND_II"}
 	if err := db.UpsertMember(ctx, tenant, m); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +127,7 @@ func TestTranche6RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := db.GetMember(ctx, tenant, memberID)
-	if err != nil || got.Status != "SUSPENDED" || got.PIN != "PEN600" {
+	if err != nil || got.Status != "SUSPENDED" || got.PIN != m.PIN {
 		t.Fatalf("GetMember = %+v, err %v", got, err)
 	}
 	if _, err := db.GetMember(ctx, tenant, "missing"); !errors.Is(err, ErrNotFound) {
@@ -131,8 +135,8 @@ func TestTranche6RoundTrip(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	old := KYCRow{ID: "kyc-t6-1", MemberID: memberID, Kind: KYCKindIAmAlive, Score: 7000, Outcome: "MANUAL_REVIEW", At: now.Add(-time.Hour)}
-	latest := KYCRow{ID: "kyc-t6-2", MemberID: memberID, Kind: KYCKindIAmAlive, Score: 9500, Outcome: "PASS", At: now}
+	old := KYCRow{ID: "kyc-" + run + "-1", MemberID: memberID, Kind: KYCKindIAmAlive, Score: 7000, Outcome: "MANUAL_REVIEW", At: now.Add(-time.Hour)}
+	latest := KYCRow{ID: "kyc-" + run + "-2", MemberID: memberID, Kind: KYCKindIAmAlive, Score: 9500, Outcome: "PASS", At: now}
 	for _, r := range []KYCRow{old, latest} {
 		if err := db.InsertKYCRecord(ctx, tenant, r); err != nil {
 			t.Fatal(err)
@@ -146,8 +150,8 @@ func TestTranche6RoundTrip(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
-	s1 := StatementRow{ID: "stmt-t6-1", MemberID: memberID, Period: "2026-10", VerifyCodeHash: "h1", GeneratedAt: now.Add(-time.Hour)}
-	s2 := StatementRow{ID: "stmt-t6-2", MemberID: memberID, Period: "2026-11", VerifyCodeHash: "h2", GeneratedAt: now}
+	s1 := StatementRow{ID: "stmt-" + run + "-1", MemberID: memberID, Period: "2026-10", VerifyCodeHash: "h1", GeneratedAt: now.Add(-time.Hour)}
+	s2 := StatementRow{ID: "stmt-" + run + "-2", MemberID: memberID, Period: "2026-11", VerifyCodeHash: "h2", GeneratedAt: now}
 	for _, s := range []StatementRow{s1, s2} {
 		if err := db.InsertStatementRecord(ctx, tenant, s); err != nil {
 			t.Fatal(err)

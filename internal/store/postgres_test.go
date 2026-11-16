@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/munisp/pfaengine/internal/contribution"
 	"github.com/munisp/pfaengine/internal/money"
@@ -23,10 +26,28 @@ func TestPostgresRoundTrip(t *testing.T) {
 	}
 	defer db.Close()
 
+	// Unique run suffix keeps the integration test idempotent across
+	// repeated runs against a persistent database.
+	run := fmt.Sprintf("%d", time.Now().UnixNano())
+	tenant := "t1-" + run
+
+	// contribution_schedule.employer_id references employer(id) — seed the
+	// parent row first so the FK holds on a live database.
+	employerID := "emp-" + run
+	if err := db.WithTenant(ctx, tenant, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO employer (id, tenant_id, rc_number, name) VALUES ($1,$2,'RC0001','Test Employer')
+			 ON CONFLICT (id) DO NOTHING`, employerID, tenant)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	memberPIN := "PEN" + run
 	s := &contribution.Schedule{
-		ID: "sched-test-1", TenantID: "t1", EmployerID: "emp1", Period: "2026-11",
+		ID: "sched-" + run, TenantID: tenant, EmployerID: employerID, Period: "2026-11",
 		Status: contribution.SchedValidated,
-		Lines:  []contribution.Line{contribution.SplitLine("PEN100", money.NGN(800000), 0, false)},
+		Lines:  []contribution.Line{contribution.SplitLine(memberPIN, money.NGN(800000), 0, false)},
 	}
 	if err := db.InsertScheduleWithLines(ctx, s); err != nil {
 		t.Fatal(err)
@@ -34,7 +55,7 @@ func TestPostgresRoundTrip(t *testing.T) {
 	if err := db.MarkSchedulePosted(ctx, s.ID); err != nil {
 		t.Fatal(err)
 	}
-	lines, total, err := db.MemberContributions(ctx, "t1", "PEN100")
+	lines, total, err := db.MemberContributions(ctx, tenant, memberPIN)
 	if err != nil || len(lines) != 1 || total != money.NGN(144000) {
 		t.Fatalf("got %v lines, %s total, err %v", len(lines), total.Naira(), err)
 	}

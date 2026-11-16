@@ -80,6 +80,7 @@ services:
   benefit:       { build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: benefit } },       ports: ["8092:8092"], depends_on: [postgres, temporal] }
   transfer:      { build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: transfer } },      ports: ["8093:8093"], depends_on: [postgres, temporal] }
   fund-pricing:  { build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: fund-pricing } },  ports: ["8094:8094"], depends_on: [postgres] }
+  member-svc:    { build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: member-svc } },    ports: ["8096:8096"], depends_on: [postgres] }
 
 volumes:
   pgdata:

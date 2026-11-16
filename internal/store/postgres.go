@@ -46,7 +46,9 @@ func (d *DB) WithTenant(ctx context.Context, tenantID string, fn func(tx *sql.Tx
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, "SET LOCAL app.tenant_id = $1", tenantID); err != nil {
+	// SET does not accept bind parameters in Postgres; set_config does and
+	// (with is_local=true) is equivalent to SET LOCAL for the transaction.
+	if _, err := tx.ExecContext(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
 		return err
 	}
 	if err := fn(tx); err != nil {

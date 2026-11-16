@@ -1,8 +1,8 @@
 # PFAEngine v1 — Completion Report
 
 Build date: 2026-11-16 · Stack: Go 1.23 (services) · Rust (ledger hot path)
-Verification: `go vet` clean, `go build` clean, **37/37 Go test packages pass**,
-**4/4 Rust tests pass**, gofmt clean.
+Verification: `go vet` clean, `go build` clean, **40/40 Go test packages pass**,
+**4/4 Rust tests pass**, gofmt clean, `sh scripts/smoke.sh` PASS.
 
 ## Scores
 
@@ -11,7 +11,7 @@ Verification: `go vet` clean, `go build` clean, **37/37 Go test packages pass**,
 | Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **97%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) + Tranche 6 Postgres repos for member/KYC/statement/report artifacts (0002 migration) implemented + tested; gaps: real vendor credentials, Temporal durable workers |
 | Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **97%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); Tranche 6: pension increases (SCM-09), annuity marketplace (SCM-11); USSD/agent rails and Kubecost outstanding |
 | Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **70%** | Webhook framework + AML done; capital-adequacy tracking (FR-517); Tranche 6: SaaS tenant billing engine (BR-08) + i18n bundles (REG-06); Tranche 7: lakehouse staging sink + MI dashboards (BR-07/09), deterministic member chatbot with USSD parity (BR-09); remaining: ML models, production lakehouse infra |
-| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **95%** | Tranches 4–7: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; remaining gaps are production hardening only |
+| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **97%** | Tranches 4–8: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; Tranche 8 production hardening shipped (shared HTTP layer, gateway routing/readiness, hardened Dockerfile, CI, smoke harness); remaining gaps are vendor credentials and infrastructure rollout |
 
 ## What is production-shaped today
 - Money/ledger correctness: integer kobo, 8-decimal units, enforced double
@@ -143,6 +143,36 @@ Verification: `go vet` clean, `go build` clean, **37/37 Go test packages pass**,
   soak-test-72h, dual-control-export, ledger-replay-parity), Assess
   adopt/missing decision, and LedgerParity replay comparison. Postgres
   remains the default ledger until Assess passes with evidence.
+
+## Tranche 8 delivered (2026-11-16) — production hardening
+- Shared HTTP service layer (internal/httpsrv): Server wrapping net/http
+  with /healthz liveness (always 200), /readyz readiness behind a Ready
+  hook, graceful SIGTERM/SIGINT shutdown with a 10s drain (tested with an
+  in-flight request), the {error, code} JSON error envelope, request-ID
+  middleware (X-Request-ID generated/propagated/echoed), tenant middleware
+  (400 TENANT_REQUIRED), and a TOTP-auth bearer middleware hook backed by
+  internal/authn (tokens only exist post password+TOTP login).
+- API gateway (cmd/api-gateway): path-prefix reverse-proxy routing to
+  backends (/api/v1/members|contributions|recon|kyc|benefits|transfers),
+  env-driven service discovery (one URL env var per service), aggregated
+  /readyz across all configured backends, 502 envelope on upstream
+  failure; webhook/event ingress preserved.
+- member-svc (cmd/member-svc): KYC-gated onboarding via the provider
+  facade (VerifyNIN mandatory, ValidateBVN optional), ledger-backed
+  balance endpoint, CSV contribution upload (ParseCSV → recon.Engine →
+  ledger post; short remittances raise exceptions), recon exception
+  queue — all in-memory stores, httptest-covered.
+- CI (.github/workflows/ci.yml): Go 1.23 setup with module caching,
+  gofmt gate, go build/vet/test; Rust stable cargo test in ledger-core;
+  Dockerfile static-check job.
+- Dockerfile hardening (deploy/Dockerfile): multi-stage golang:1.23 →
+  alpine:3.20, CGO_ENABLED=0 static build, non-root user (uid 10001),
+  EXPOSE 8080, /healthz HEALTHCHECK, single SERVICE build arg for all
+  binaries; scripts/verify-dockerfile.sh statically asserts each property.
+- Smoke harness (scripts/smoke.sh): POSIX sh, builds both binaries,
+  checks probes, tenant enforcement, onboarding, CSV upload, exact
+  integer-kobo balance, recon exceptions, and SIGTERM drain; prints
+  PASS/FAIL — currently PASS.
 
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
