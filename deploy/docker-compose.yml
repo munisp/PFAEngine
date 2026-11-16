@@ -184,5 +184,52 @@ services:
       <<: *app-healthcheck
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8096/healthz"]
 
+  # ---- Tranche 18: AI/ML stack ----
+  ml-serve:
+    # FraudFusion CPU inference (champion model from registry)
+    build:
+      context: ..
+      dockerfile: deploy/ml-serve.Dockerfile
+    environment:
+      ML_REGISTRY_ROOT: /models
+    volumes: ["mlmodels:/models"]
+    ports: ["8077:8077"]
+
+  mlflow:
+    # Model tracking server; MLFLOW_TRACKING_URI=http://mlflow:5050 switches
+    # pfa_ml.registry from file-based to MLflow-backed automatically.
+    image: ghcr.io/mlflow/mlflow:v3.1.0
+    command: mlflow server --host 0.0.0.0 --port 5050 --backend-store-uri sqlite:///mlflow.db --default-artifact-root /artifacts
+    ports: ["5050:5050"]
+    volumes: ["mlflowartifacts:/artifacts"]
+
+  ml-train:
+    # Continuous training driver: extract -> train -> evaluate -> promote
+    build:
+      context: ..
+      dockerfile: deploy/ml-serve.Dockerfile
+    command: ["python", "-m", "pfa_ml.continuous", "--dsn", "postgres://postgres:pfaengine@postgres:5432/pfaengine", "--tenant", "dev", "--interval", "3600"]
+    environment:
+      ML_REGISTRY_ROOT: /models
+      MLFLOW_TRACKING_URI: http://mlflow:5050
+    volumes: ["mlmodels:/models"]
+    depends_on: [postgres, mlflow]
+
+  falkordb:
+    # Graph store: fraud rings + pension knowledge graph (KGQA backend)
+    image: falkordb/falkordb:latest
+    ports: ["6379:6379"]
+    volumes: ["falkordata:/data"]
+
+  ollama:
+    # Self-hosted LLM for chatbot rephrasing + ops (deterministic intents stay primary)
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: ["ollamadata:/root/.ollama"]
+
 volumes:
   pgdata:
+  mlmodels:
+  mlflowartifacts:
+  falkordata:
+  ollamadata:

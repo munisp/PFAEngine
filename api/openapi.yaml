@@ -522,6 +522,16 @@ paths:
       summary: Resolve a case (CONFIRMED_FRAUD | CLEARED)
       tags: [Innovation]
       responses: { '200': { description: Case } }
+  /v1/ml/fraud/screen:
+    post:
+      summary: Fused fraud screening — rules engine + FraudFusion ML (fail-closed to rules)
+      tags: [ML]
+      responses: { '200': { description: Fused score } }
+  /v1/ml/health:
+    get:
+      summary: ML inference service health + champion model version
+      tags: [ML]
+      responses: { '200': { description: Health } }
   /v1/readiness/reports:
     post:
       summary: Compute employer workforce retirement-readiness index (0-100 + grade)

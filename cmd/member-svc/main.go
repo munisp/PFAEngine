@@ -39,6 +39,7 @@ import (
 	"github.com/munisp/pfaengine/internal/literacy"
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/micropension"
+	"github.com/munisp/pfaengine/internal/mlscore"
 	"github.com/munisp/pfaengine/internal/money"
 	"github.com/munisp/pfaengine/internal/mortgage"
 	"github.com/munisp/pfaengine/internal/mpg"
@@ -107,8 +108,18 @@ type deps struct {
 	regfile      *regfile.Engine
 	esg          *esg.Engine
 	innovateRepo *store.InnovateRepo
+	// ml is the FraudFusion inference client (nil when ML_SCORE_URL unset —
+	// fail-closed to the rules engine).
+	ml *mlscore.Client
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
+}
+
+func mlClientFromEnv() *mlscore.Client {
+	if u := httpsrv.Getenv("ML_SCORE_URL", ""); u != "" {
+		return mlscore.New(u)
+	}
+	return nil
 }
 
 func main() {
@@ -179,6 +190,7 @@ func main() {
 		esg:            esg.NewEngine(),
 		innovateRepo:   innovateRepo,
 		stmtSecret:     []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
+		ml:             mlClientFromEnv(),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
 	log.Fatal(srv.Run())
@@ -260,6 +272,8 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/fraud/screen", func(d *deps) http.HandlerFunc { return d.fraudScreen }},
 	{"GET", "/api/v1/fraud/cases", func(d *deps) http.HandlerFunc { return d.fraudCases }},
 	{"POST", "/api/v1/fraud/resolve", func(d *deps) http.HandlerFunc { return d.fraudResolve }},
+	{"POST", "/api/v1/ml/fraud/screen", func(d *deps) http.HandlerFunc { return d.mlFraudScreen }},
+	{"GET", "/api/v1/ml/health", func(d *deps) http.HandlerFunc { return d.mlHealth }},
 	{"POST", "/api/v1/readiness/reports", func(d *deps) http.HandlerFunc { return d.readinessCompute }},
 	{"GET", "/api/v1/readiness/reports", func(d *deps) http.HandlerFunc { return d.readinessList }},
 	{"POST", "/api/v1/diaspora/members", func(d *deps) http.HandlerFunc { return d.diasporaEnrol }},

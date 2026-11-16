@@ -405,6 +405,32 @@ exact at $500->N765,000, agent commission 2.5%=N500, regfile 2-month-late
 penalty N40,000, ESG grade A); restart durability on persisted domains
 (fraud cases, mortgage status, escalation post-tick rate, nominations).
 
+## Tranche 18 — Real AI/ML/DL/GNN stack + tool integrations (2026-11-17)
+
+- **ml/ platform**: synthgen (Nigerian-pattern, 5 fraud archetypes), features
+  (leakage-free), GraphSAGE GNN + FraudFusion (tabular+GRU+GNN towers) + MCMC
+  threshold calibration, k-fold out-of-fold embedding training, MLflow/file
+  registry with champion/challenger, drift monitor (PSI/KS), A/B (hash split +
+  z-test), Ray data-parallel (verified 2-worker), continuous training from
+  production Postgres (extract verified against live schema), CPU inference
+  service. Shipped weights: ml/models/fraudfusion/v1 (fusion AUC 1.0,
+  precision 1.0, recall 0.92; MCMC threshold 0.44).
+- **Integrity fixes found by testing**: sequence label leakage removed,
+  transductive GNN leak fixed via k-fold OOF embeddings, A1 archetype made
+  truly dormant, BCELoss weighting bug fixed, ring/legit device noise fixed.
+- **Go integrations**: internal/mlscore (fail-closed client, 800ms budget),
+  POST /api/v1/ml/fraud/screen (rules+ML fusion) + GET /api/v1/ml/health;
+  internal/falkor (raw-RESP FalkorDB graph client), internal/ollama
+  (PII-stripping LLM rephrase, fail-closed); ml/pfa_ml/kgqa.py (EPR-style
+  evidence-pattern QA), ml/cocoindex_flow.py (incremental indexing sidecar).
+- **Compose**: ml-serve, mlflow, ml-train (continuous), falkordb, ollama
+  services + ml-serve.Dockerfile.
+- **Docs**: T18-AIML.md (tool analysis + infra audit + gap closure),
+  T18-READINESS.md (per-feature scorecard, overall 84/100).
+- **Tests**: 22 Python tests OK; Go mlscore/ollama/falkor tests OK;
+  full go build ./... + go test ./... OK; live smoke member-svc -> ML
+  service: dormant-then-large scored 81/100 flagged, normal contribution 0.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the

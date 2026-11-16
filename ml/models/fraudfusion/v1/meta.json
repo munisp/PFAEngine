@@ -1,0 +1,17 @@
+{
+  "feature_version": "2ce7709e1120",
+  "dataset_sha256": "3e7129602662d25afa58cb4be98ed8c1ed315315d54dbae15dd477fefb62b50d",
+  "threshold": 0.4376072835850621,
+  "threshold_ci": [
+    0.11633864447759042,
+    0.7799144348550848
+  ],
+  "metrics": {
+    "gnn_val_auc": 0.6733,
+    "fusion_val_auc": 1.0,
+    "mcmc_threshold": 0.4376,
+    "precision": 1.0,
+    "recall": 0.9189,
+    "train_seconds": 7.8
+  }
+}
