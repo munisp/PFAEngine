@@ -19,6 +19,7 @@ import (
 	"github.com/munisp/pfaengine/internal/chatbot"
 	"github.com/munisp/pfaengine/internal/i18n"
 	"github.com/munisp/pfaengine/internal/notify"
+	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/tenancy"
 	"github.com/munisp/pfaengine/internal/vendors"
 )
@@ -32,6 +33,13 @@ type deps struct {
 	tenants     *tenancy.Registry
 	responder   chatbot.Responder
 	locale      i18n.Locale
+	// resolveLocale maps an inbound WhatsApp sender ("from", bare digits)
+	// to the member's preferred locale via the phone→member mapping in
+	// prefs. When nil (or the number is unknown) replies fall back to
+	// d.locale. NOTE: prefs.Store is in-memory per process — member-svc
+	// links phones in its own process, so cross-service resolution needs a
+	// shared store (Postgres/Redis) in production.
+	resolveLocale func(from string) i18n.Locale
 	// sendText delivers a chatbot reply; injectable for tests. When nil the
 	// reply is computed but not sent (WhatsApp send not configured).
 	sendText func(ctx context.Context, to, body string) (string, error)
@@ -62,6 +70,10 @@ func main() {
 		tenants:     tenancy.NewRegistry(),
 		locale:      i18n.English,
 	}
+	// Phone→locale resolution shared with member-svc (in-memory; see the
+	// resolveLocale field comment for the cross-service limitation).
+	memberPrefs := prefs.NewStore()
+	d.resolveLocale = memberPrefs.LocaleForPhone
 	if bundles, err := i18n.LoadDir(appx.Env("I18N_DIR", "i18n")); err != nil {
 		log.Printf("[notification] i18n bundles unavailable (%v); replies fall back to message keys", err)
 	} else {
@@ -189,7 +201,11 @@ func (d *deps) whatsappInbound(w http.ResponseWriter, r *http.Request) {
 		if m.Type != "text" {
 			continue
 		}
-		reply := d.responder.HandleWhatsApp(d.locale, m)
+		loc := d.locale
+		if d.resolveLocale != nil {
+			loc = d.resolveLocale(m.From)
+		}
+		reply := d.responder.HandleWhatsApp(loc, m)
 		if d.sendText != nil {
 			if _, err := d.sendText(r.Context(), m.From, reply); err != nil {
 				appx.Err(w, http.StatusBadGateway, "WHATSAPP_SEND_FAILED", err)

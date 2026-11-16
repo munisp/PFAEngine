@@ -98,6 +98,43 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: History } }
+  /v1/members/{id}/alive:
+    post:
+      summary: '"I Am Alive" liveness check from the member PWA (KYC liveness engine, IAM_ALIVE kind; consent required; retry cap 3/24h)'
+      tags: [Benefits & Transfers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{status: VERIFIED, next_due}' }
+        '202': { description: '{status: MANUAL_REVIEW}' }
+        '400': { description: Consent required / bad request }
+        '422': { description: '{status: FAILED, retries_left}' }
+        '429': { description: Retry cap exceeded }
+    get:
+      summary: Member liveness status (last verified at, next due)
+      tags: [Benefits & Transfers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{last_verified_at, next_due, status}' }
+        '404': { description: Unknown member or never verified }
+  /v1/members/{id}/locale:
+    put:
+      summary: Set member preferred locale (en, yo, ha, ig, pcm-NG) for app and channel replies
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{member_id, locale}' }
+        '400': { description: Unsupported locale }
+    get:
+      summary: Get member preferred locale (defaults to en)
+      tags: [Onboarding & KYC]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: '{member_id, locale}' }
+        '404': { description: Unknown member }
   /v1/members/{id}/balance:
     get:
       summary: Member RSA balance from the ledger (integer kobo)

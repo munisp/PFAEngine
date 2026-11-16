@@ -8,14 +8,15 @@ import 'screens/dashboard.dart';
 void main() {
   const tenantId = String.fromEnvironment('TENANT_ID', defaultValue: 'demo-pfa');
   const apiBase = String.fromEnvironment('API_BASE', defaultValue: 'http://localhost:8080');
-  runApp(PFAApp(tenantId: tenantId, apiBase: apiBase, theme: TenantTheme.demo()));
+  runApp(PFAApp(tenantId: tenantId, apiBase: apiBase, tenantTheme: TenantTheme.demo()));
 }
 
 class PFAApp extends StatelessWidget {
   final String tenantId;
   final String apiBase;
   final TenantTheme tenantTheme;
-  const PFAEngineAppState({super.key, required this.tenantId, required this.apiBase, required this.tenantTheme});
+
+  const PFAApp({super.key, required this.tenantId, required this.apiBase, required this.tenantTheme});
 
   @override
   Widget build(BuildContext context) {

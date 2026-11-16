@@ -16,28 +16,36 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
 	"github.com/munisp/pfaengine/internal/contribution"
 	"github.com/munisp/pfaengine/internal/httpsrv"
+	"github.com/munisp/pfaengine/internal/i18n"
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
+	"github.com/munisp/pfaengine/internal/retiree"
 	"github.com/munisp/pfaengine/internal/statement"
 )
 
 // deps bundles the domain stores the handlers operate on.
 type deps struct {
-	kyc        *kyc.Service
-	members    *member.Registry
-	ledger     *ledger.Ledger
-	recon      *recon.Engine
-	audit      *audit.Store
-	authn      *authn.Service
+	kyc      *kyc.Service
+	members  *member.Registry
+	ledger   *ledger.Ledger
+	recon    *recon.Engine
+	audit    *audit.Store
+	authn    *authn.Service
+	retirees *retiree.Register
+	prefs    *prefs.Store
+	alive    *aliveTracker
+	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
 
@@ -52,6 +60,9 @@ func main() {
 		recon:      recon.NewEngine(),
 		audit:      audit.NewStore(),
 		authn:      authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
+		retirees:   retiree.NewRegister(),
+		prefs:      prefs.NewStore(),
+		alive:      newAliveTracker(),
 		stmtSecret: []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
@@ -69,6 +80,10 @@ type routeEntry struct {
 // route table (OpenAPI contract test).
 var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/members", func(d *deps) http.HandlerFunc { return d.createMember }},
+	{"POST", "/api/v1/members/{id}/alive", func(d *deps) http.HandlerFunc { return d.submitAlive }},
+	{"GET", "/api/v1/members/{id}/alive", func(d *deps) http.HandlerFunc { return d.aliveStatus }},
+	{"PUT", "/api/v1/members/{id}/locale", func(d *deps) http.HandlerFunc { return d.setLocale }},
+	{"GET", "/api/v1/members/{id}/locale", func(d *deps) http.HandlerFunc { return d.getLocale }},
 	{"GET", "/api/v1/members/{id}/balance", func(d *deps) http.HandlerFunc { return d.balance }},
 	{"GET", "/api/v1/members/{id}/statement", func(d *deps) http.HandlerFunc { return d.statementJSON }},
 	{"POST", "/api/v1/statements/verify", func(d *deps) http.HandlerFunc { return d.verifyStatement }},
@@ -129,6 +144,10 @@ func (d *deps) createMember(w http.ResponseWriter, r *http.Request) {
 	}
 	tenant := httpsrv.TenantOf(r)
 	p := d.members.CreatePerson(tenant, in.FullName, in.DOB, in.Phone, in.Email)
+	// Bind the member's phone so channel services (e.g. the WhatsApp
+	// webhook) can resolve the sender to this member and their locale.
+	// NOTE: prefs.Store is in-memory per process — see internal/prefs.
+	d.prefs.LinkPhone(in.Phone, p.ID)
 
 	ninRec, dupOf, err := d.kyc.VerifyNIN(tenant, p.ID, in.NIN, in.FullName, in.DOB)
 	if err != nil {
@@ -159,6 +178,212 @@ func (d *deps) createMember(w http.ResponseWriter, r *http.Request) {
 		out["duplicate_of"] = dupOf
 	}
 	httpsrv.WriteJSON(w, http.StatusCreated, out)
+}
+
+// maxAliveRetries is the I-Am-Alive retry cap: at most 3 failed attempts
+// per member per rolling 24-hour window. The counter is in-memory
+// (aliveTracker); a durable deployment should move it next to the KYC
+// records (Postgres) — documented follow-up.
+const maxAliveRetries = 3
+
+// aliveRetryWindow is the retry-cap window (24h).
+const aliveRetryWindow = 24 * time.Hour
+
+// aliveRecord is the member-facing liveness status returned by
+// GET /members/{id}/alive.
+type aliveRecord struct {
+	LastVerifiedAt time.Time `json:"last_verified_at"`
+	NextDue        time.Time `json:"next_due"`
+	Status         string    `json:"status"` // VERIFIED
+}
+
+// aliveTracker keeps the member-facing liveness status (for members who are
+// not in the retiree register) and the per-member failed-attempt counters
+// for the retry cap. Thread-safe; in-memory only.
+type aliveTracker struct {
+	mu      sync.Mutex
+	records map[string]aliveRecord
+	fails   map[string][]time.Time
+}
+
+func newAliveTracker() *aliveTracker {
+	return &aliveTracker{records: map[string]aliveRecord{}, fails: map[string][]time.Time{}}
+}
+
+// retriesLeft prunes failures older than the window and returns how many
+// failed attempts the member may still make (0 = capped).
+func (t *aliveTracker) retriesLeft(memberID string, now time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	kept := t.fails[memberID][:0]
+	for _, at := range t.fails[memberID] {
+		if now.Sub(at) < aliveRetryWindow {
+			kept = append(kept, at)
+		}
+	}
+	t.fails[memberID] = kept
+	left := maxAliveRetries - len(kept)
+	if left < 0 {
+		left = 0
+	}
+	return left
+}
+
+// recordFailure notes one failed attempt.
+func (t *aliveTracker) recordFailure(memberID string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.fails[memberID] = append(t.fails[memberID], now)
+}
+
+// markVerified records a successful verification for the status endpoint.
+func (t *aliveTracker) markVerified(memberID string, at, nextDue time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.records[memberID] = aliveRecord{LastVerifiedAt: at, NextDue: nextDue, Status: "VERIFIED"}
+}
+
+// status returns the member's last successful verification.
+func (t *aliveTracker) status(memberID string) (aliveRecord, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	rec, ok := t.records[memberID]
+	return rec, ok
+}
+
+// submitAlive handles POST /api/v1/members/{id}/alive — the PWA I-Am-Alive
+// check (FR-108). The selfie runs through the KYC provider facade with the
+// IAM_ALIVE kind and regulator thresholds: score >= 0.80 verifies (200),
+// 0.60-0.80 queues for manual review (202), < 0.60 fails (422) with the
+// remaining retries. Explicit consent is required (NDPA, FR-106).
+func (d *deps) submitAlive(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := d.members.Person(id); !ok {
+		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("member not found"))
+		return
+	}
+	var in struct {
+		SelfieRef string `json:"selfie_ref"`
+		Consent   bool   `json:"consent"`
+	}
+	if err := decode(r, &in); err != nil {
+		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
+		return
+	}
+	if !in.Consent {
+		httpsrv.WriteError(w, http.StatusBadRequest, "CONSENT_REQUIRED",
+			errors.New("explicit consent is required for liveness verification"))
+		return
+	}
+	if in.SelfieRef == "" {
+		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", errors.New("selfie_ref is required"))
+		return
+	}
+	tenant := httpsrv.TenantOf(r)
+	now := time.Now().UTC()
+
+	// Retry cap: 3 failed attempts per member per rolling 24h.
+	if left := d.alive.retriesLeft(id, now); left <= 0 {
+		httpsrv.WriteJSON(w, http.StatusTooManyRequests, map[string]any{
+			"status": "FAILED", "retries_left": 0,
+			"error": "retry cap reached; try again after 24 hours",
+		})
+		return
+	}
+	d.kyc.RecordConsent(tenant, id, "IAM_ALIVE", "alive-v1", true)
+	chk, err := d.kyc.SubmitLiveness(tenant, id, kyc.KindIAmAlive, in.SelfieRef)
+	if err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, kyc.ErrRetryCapExceeded) {
+			status = http.StatusTooManyRequests
+		}
+		httpsrv.WriteError(w, status, "LIVENESS_FAILED", err)
+		return
+	}
+	d.audit.Append(audit.Record{TenantID: tenant, Actor: "member-svc", Action: "member.alive.submitted",
+		EntityType: "liveness", EntityID: chk.ID,
+		After: map[string]any{"member_id": id, "status": string(chk.Status), "score": chk.Score}})
+
+	switch chk.Status {
+	case kyc.StatusPassed:
+		// Retiree register semantics (FR-108): reset the 12-month clock.
+		// Members who are not (yet) retirees still get the KYC record and a
+		// 12-month next-due date.
+		nextDue := now.AddDate(1, 0, 0)
+		if d.retirees.RecordLiveness(id, now) {
+			if rt, ok := d.retirees.Get(id); ok {
+				nextDue = rt.NextLivenessDue
+			}
+		}
+		d.alive.markVerified(id, now, nextDue)
+		httpsrv.WriteJSON(w, http.StatusOK, map[string]any{
+			"status": "VERIFIED", "next_due": nextDue, "score": chk.Score,
+		})
+	case kyc.StatusManualReview:
+		httpsrv.WriteJSON(w, http.StatusAccepted, map[string]any{
+			"status": "MANUAL_REVIEW", "check_id": chk.ID, "score": chk.Score,
+		})
+	default: // StatusFailed
+		d.alive.recordFailure(id, now)
+		httpsrv.WriteJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"status": "FAILED", "retries_left": d.alive.retriesLeft(id, now), "score": chk.Score,
+		})
+	}
+}
+
+// aliveStatus handles GET /api/v1/members/{id}/alive: the member's last
+// successful I-Am-Alive verification and the next due date (404 when the
+// member has never verified).
+func (d *deps) aliveStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := d.members.Person(id); !ok {
+		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("member not found"))
+		return
+	}
+	rec, ok := d.alive.status(id)
+	if !ok {
+		httpsrv.WriteError(w, http.StatusNotFound, "NEVER_VERIFIED",
+			errors.New("member has no successful liveness verification"))
+		return
+	}
+	httpsrv.WriteJSON(w, http.StatusOK, rec)
+}
+
+// setLocale handles PUT /api/v1/members/{id}/locale: stores the member's
+// preferred locale (REG-06) for app and channel (WhatsApp/USSD) replies.
+func (d *deps) setLocale(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := d.members.Person(id); !ok {
+		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("member not found"))
+		return
+	}
+	var in struct {
+		Locale string `json:"locale"`
+	}
+	if err := decode(r, &in); err != nil {
+		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
+		return
+	}
+	loc := i18n.Locale(in.Locale)
+	if !prefs.Supported(loc) {
+		httpsrv.WriteError(w, http.StatusBadRequest, "UNSUPPORTED_LOCALE",
+			errors.New("locale must be one of en, yo, ha, ig, pcm-NG"))
+		return
+	}
+	d.prefs.Set(id, loc)
+	d.audit.Append(audit.Record{TenantID: httpsrv.TenantOf(r), Actor: "member-svc", Action: "member.locale.set",
+		EntityType: "person", EntityID: id, After: map[string]any{"locale": string(loc)}})
+	httpsrv.WriteJSON(w, http.StatusOK, map[string]any{"member_id": id, "locale": string(loc)})
+}
+
+// getLocale handles GET /api/v1/members/{id}/locale (defaults to English).
+func (d *deps) getLocale(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, ok := d.members.Person(id); !ok {
+		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("member not found"))
+		return
+	}
+	httpsrv.WriteJSON(w, http.StatusOK, map[string]any{"member_id": id, "locale": string(d.prefs.Get(id))})
 }
 
 // balance returns the member's RSA balance from the ledger (integer kobo).

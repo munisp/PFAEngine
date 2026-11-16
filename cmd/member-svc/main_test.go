@@ -14,7 +14,9 @@ import (
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/member"
+	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
+	"github.com/munisp/pfaengine/internal/retiree"
 	"github.com/munisp/pfaengine/internal/statement"
 )
 
@@ -26,6 +28,9 @@ func newTestDeps() *deps {
 		recon:      recon.NewEngine(),
 		audit:      audit.NewStore(),
 		authn:      authn.NewService("test-signing-secret-0123456789"),
+		retirees:   retiree.NewRegister(),
+		prefs:      prefs.NewStore(),
+		alive:      newAliveTracker(),
 		stmtSecret: []byte("test-statement-secret"),
 	}
 }
