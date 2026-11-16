@@ -20,25 +20,39 @@ import (
 	"sync"
 	"time"
 
+	"github.com/munisp/pfaengine/internal/agents"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
+	"github.com/munisp/pfaengine/internal/claimsfast"
 	"github.com/munisp/pfaengine/internal/contribution"
+	"github.com/munisp/pfaengine/internal/diaspora"
+	"github.com/munisp/pfaengine/internal/embedded"
+	"github.com/munisp/pfaengine/internal/escalation"
+	"github.com/munisp/pfaengine/internal/esg"
+	"github.com/munisp/pfaengine/internal/fraud"
+	"github.com/munisp/pfaengine/internal/glidepath"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/i18n"
 	"github.com/munisp/pfaengine/internal/invmandate"
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
+	"github.com/munisp/pfaengine/internal/literacy"
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/micropension"
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/mortgage"
 	"github.com/munisp/pfaengine/internal/mpg"
 	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/pencare"
 	"github.com/munisp/pfaengine/internal/prefs"
+	"github.com/munisp/pfaengine/internal/readiness"
 	"github.com/munisp/pfaengine/internal/recon"
+	"github.com/munisp/pfaengine/internal/regfile"
 	"github.com/munisp/pfaengine/internal/retiree"
+	"github.com/munisp/pfaengine/internal/roundup"
 	"github.com/munisp/pfaengine/internal/statement"
 	"github.com/munisp/pfaengine/internal/store"
+	"github.com/munisp/pfaengine/internal/succession"
 )
 
 // deps bundles the domain stores the handlers operate on.
@@ -76,6 +90,23 @@ type deps struct {
 	// (FSD Africa $750m platform use case).
 	invmandate     *invmandate.Engine
 	invmandateRepo *store.InvMandateRepo
+	// Tranche 17: 15-innovation engines (in-memory cores; persisted
+	// domains write through to innovateRepo when DATABASE_URL is set).
+	escalation   *escalation.Engine
+	roundup      *roundup.Engine
+	glidepath    *glidepath.Engine
+	literacy     *literacy.Engine
+	mortgage     *mortgage.Engine
+	claimsfast   *claimsfast.Engine
+	succession   *succession.Engine
+	fraud        *fraud.Engine
+	readiness    *readiness.Engine
+	diaspora     *diaspora.Engine
+	agents       *agents.Engine
+	embedded     *embedded.Engine
+	regfile      *regfile.Engine
+	esg          *esg.Engine
+	innovateRepo *store.InnovateRepo
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -93,6 +124,7 @@ func main() {
 	var mpgRepo *store.MPGRepo
 	var pencareRepo *store.PenCareRepo
 	var invmandateRepo *store.InvMandateRepo
+	var innovateRepo *store.InnovateRepo
 	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
 		db, err := store.Open(context.Background(), dsn)
 		if err != nil {
@@ -104,9 +136,12 @@ func main() {
 		mpgRepo = store.NewMPGRepo(db)
 		pencareRepo = store.NewPenCareRepo(db)
 		invmandateRepo = store.NewInvMandateRepo(db)
-		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate persist to Postgres")
+		innovateRepo = store.NewInnovateRepo(db)
+		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate + innovations persist to Postgres")
 	}
 	mpgEngine := mpg.NewEngine()
+	literacyEngine := literacy.NewEngine()
+	literacyEngine.Seed()
 	d := &deps{
 		kyc: kyc.NewService(salt,
 			kyc.MockProvider{ProviderName: "mock-nimc"},
@@ -128,6 +163,21 @@ func main() {
 		pencareRepo:    pencareRepo,
 		invmandate:     invmandate.NewEngine(),
 		invmandateRepo: invmandateRepo,
+		escalation:     escalation.NewEngine(),
+		roundup:        roundup.NewEngine(),
+		glidepath:      glidepath.NewEngine(),
+		literacy:       literacyEngine,
+		mortgage:       mortgage.NewEngine(),
+		claimsfast:     claimsfast.NewEngine(),
+		succession:     succession.NewEngine(365 * 24 * time.Hour),
+		fraud:          fraud.NewEngine(),
+		readiness:      readiness.NewEngine(),
+		diaspora:       diaspora.NewEngine(),
+		agents:         agents.NewEngine(),
+		embedded:       embedded.NewEngine(),
+		regfile:        regfile.NewEngine(),
+		esg:            esg.NewEngine(),
+		innovateRepo:   innovateRepo,
 		stmtSecret:     []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
@@ -183,6 +233,52 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/investment/deployments", func(d *deps) http.HandlerFunc { return d.createDeployment }},
 	{"GET", "/api/v1/investment/deployments", func(d *deps) http.HandlerFunc { return d.listDeployments }},
 	{"GET", "/api/v1/investment/exposure", func(d *deps) http.HandlerFunc { return d.invExposure }},
+	{"POST", "/api/v1/advisory/project", func(d *deps) http.HandlerFunc { return d.advisoryProject }},
+	{"POST", "/api/v1/escalation/rules", func(d *deps) http.HandlerFunc { return d.escalationEnrol }},
+	{"GET", "/api/v1/escalation/rules", func(d *deps) http.HandlerFunc { return d.escalationList }},
+	{"POST", "/api/v1/escalation/tick", func(d *deps) http.HandlerFunc { return d.escalationTick }},
+	{"POST", "/api/v1/escalation/optout", func(d *deps) http.HandlerFunc { return d.escalationOptOut }},
+	{"POST", "/api/v1/roundup/wallets", func(d *deps) http.HandlerFunc { return d.roundupOpen }},
+	{"POST", "/api/v1/roundup/sweeps", func(d *deps) http.HandlerFunc { return d.roundupSweep }},
+	{"GET", "/api/v1/roundup/wallets", func(d *deps) http.HandlerFunc { return d.roundupWallet }},
+	{"POST", "/api/v1/glidepath/members", func(d *deps) http.HandlerFunc { return d.glidepathRegister }},
+	{"GET", "/api/v1/glidepath/members", func(d *deps) http.HandlerFunc { return d.glidepathGet }},
+	{"POST", "/api/v1/glidepath/birthday", func(d *deps) http.HandlerFunc { return d.glidepathBirthday }},
+	{"POST", "/api/v1/glidepath/elect", func(d *deps) http.HandlerFunc { return d.glidepathElect }},
+	{"GET", "/api/v1/literacy/catalogue", func(d *deps) http.HandlerFunc { return d.literacyCatalogue }},
+	{"POST", "/api/v1/literacy/answer", func(d *deps) http.HandlerFunc { return d.literacyAnswer }},
+	{"GET", "/api/v1/literacy/score", func(d *deps) http.HandlerFunc { return d.literacyScore }},
+	{"POST", "/api/v1/mortgage/applications", func(d *deps) http.HandlerFunc { return d.mortgageApply }},
+	{"GET", "/api/v1/mortgage/applications", func(d *deps) http.HandlerFunc { return d.mortgageList }},
+	{"POST", "/api/v1/mortgage/decisions", func(d *deps) http.HandlerFunc { return d.mortgageDecide }},
+	{"POST", "/api/v1/claimsfast/packs", func(d *deps) http.HandlerFunc { return d.claimsOpen }},
+	{"GET", "/api/v1/claimsfast/packs", func(d *deps) http.HandlerFunc { return d.claimsGet }},
+	{"POST", "/api/v1/claimsfast/complete", func(d *deps) http.HandlerFunc { return d.claimsComplete }},
+	{"POST", "/api/v1/succession/nominations", func(d *deps) http.HandlerFunc { return d.successionNominate }},
+	{"GET", "/api/v1/succession/nominations", func(d *deps) http.HandlerFunc { return d.successionGet }},
+	{"GET", "/api/v1/succession/due", func(d *deps) http.HandlerFunc { return d.successionDue }},
+	{"POST", "/api/v1/fraud/screen", func(d *deps) http.HandlerFunc { return d.fraudScreen }},
+	{"GET", "/api/v1/fraud/cases", func(d *deps) http.HandlerFunc { return d.fraudCases }},
+	{"POST", "/api/v1/fraud/resolve", func(d *deps) http.HandlerFunc { return d.fraudResolve }},
+	{"POST", "/api/v1/readiness/reports", func(d *deps) http.HandlerFunc { return d.readinessCompute }},
+	{"GET", "/api/v1/readiness/reports", func(d *deps) http.HandlerFunc { return d.readinessList }},
+	{"POST", "/api/v1/diaspora/members", func(d *deps) http.HandlerFunc { return d.diasporaEnrol }},
+	{"POST", "/api/v1/diaspora/rates", func(d *deps) http.HandlerFunc { return d.diasporaSetRate }},
+	{"POST", "/api/v1/diaspora/contributions", func(d *deps) http.HandlerFunc { return d.diasporaContribute }},
+	{"GET", "/api/v1/diaspora/contributions", func(d *deps) http.HandlerFunc { return d.diasporaList }},
+	{"POST", "/api/v1/agents", func(d *deps) http.HandlerFunc { return d.agentsAccredit }},
+	{"POST", "/api/v1/agents/enrolments", func(d *deps) http.HandlerFunc { return d.agentsEnrol }},
+	{"POST", "/api/v1/agents/commissions", func(d *deps) http.HandlerFunc { return d.agentsCommission }},
+	{"GET", "/api/v1/agents/leaderboard", func(d *deps) http.HandlerFunc { return d.agentsLeaderboard }},
+	{"POST", "/api/v1/embedded/keys", func(d *deps) http.HandlerFunc { return d.embeddedIssueKey }},
+	{"POST", "/api/v1/embedded/webhooks", func(d *deps) http.HandlerFunc { return d.embeddedSubscribe }},
+	{"POST", "/api/v1/embedded/dispatch", func(d *deps) http.HandlerFunc { return d.embeddedDispatch }},
+	{"POST", "/api/v1/regfile/filings", func(d *deps) http.HandlerFunc { return d.regfileSchedule }},
+	{"GET", "/api/v1/regfile/filings", func(d *deps) http.HandlerFunc { return d.regfileList }},
+	{"POST", "/api/v1/regfile/generate", func(d *deps) http.HandlerFunc { return d.regfileGenerate }},
+	{"POST", "/api/v1/regfile/file", func(d *deps) http.HandlerFunc { return d.regfileFile }},
+	{"POST", "/api/v1/esg/reports", func(d *deps) http.HandlerFunc { return d.esgReport }},
+	{"GET", "/api/v1/esg/rollup", func(d *deps) http.HandlerFunc { return d.esgRollup }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for

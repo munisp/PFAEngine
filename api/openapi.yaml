@@ -376,6 +376,250 @@ paths:
       parameters:
         - { name: mandate_id, in: query, required: true, schema: { type: string } }
       responses: { '200': { description: Exposure }, '404': { description: Mandate not found } }
+  /v1/advisory/project:
+    post:
+      summary: Retirement adequacy projection — projected balance, expected pension, gap, recommended extra contribution
+      tags: [Innovation]
+      responses: { '200': { description: Projection } }
+  /v1/escalation/rules:
+    post:
+      summary: Enrol member in contribution auto-escalation
+      tags: [Innovation]
+      responses: { '201': { description: Enrolled } }
+    get:
+      summary: List escalation rules
+      tags: [Innovation]
+      responses: { '200': { description: Rules } }
+  /v1/escalation/tick:
+    post:
+      summary: Apply annual escalation step-ups (audited events)
+      tags: [Innovation]
+      responses: { '200': { description: Step-up events } }
+  /v1/escalation/optout:
+    post:
+      summary: Opt a member out of escalation (reason required, audited)
+      tags: [Innovation]
+      responses: { '200': { description: Opted out } }
+  /v1/roundup/wallets:
+    post:
+      summary: Open a round-up AVC wallet (step + monthly cap)
+      tags: [Innovation]
+      responses: { '201': { description: Wallet } }
+    get:
+      summary: Get wallet + sweep history (member_id)
+      tags: [Innovation]
+      parameters:
+        - { name: member_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Wallet } }
+  /v1/roundup/sweeps:
+    post:
+      summary: Book a round-up sweep for a transaction
+      tags: [Innovation]
+      responses: { '201': { description: Sweep } }
+  /v1/glidepath/members:
+    post:
+      summary: Register member into PenCom multi-fund lifecycle (Fund I-IV by age/election)
+      tags: [Innovation]
+      responses: { '201': { description: Assignment } }
+    get:
+      summary: Get member fund assignment + switch history (member_id)
+      tags: [Innovation]
+      parameters:
+        - { name: member_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Member + switches } }
+  /v1/glidepath/birthday:
+    post:
+      summary: Advance member age; auto-switch fund on band crossing
+      tags: [Innovation]
+      responses: { '200': { description: Switch or null } }
+  /v1/glidepath/elect:
+    post:
+      summary: Elect a fund (age/status rules enforced, e.g. Fund I <50 only)
+      tags: [Innovation]
+      responses: { '200': { description: Switch } }
+  /v1/literacy/catalogue:
+    get:
+      summary: Localized financial-literacy lessons (lang=en|pcm|ha|yo|ig, topic filter)
+      tags: [Innovation]
+      parameters:
+        - { name: lang, in: query, required: false, schema: { type: string } }
+        - { name: topic, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Lessons } }
+  /v1/literacy/answer:
+    post:
+      summary: Submit a quiz answer; records member progress
+      tags: [Innovation]
+      responses: { '200': { description: Progress } }
+  /v1/literacy/score:
+    get:
+      summary: Member literacy score (member_id)
+      tags: [Innovation]
+      parameters:
+        - { name: member_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Score } }
+  /v1/mortgage/applications:
+    post:
+      summary: Apply for 25% RSA residential-mortgage equity contribution (PRA s.89(2))
+      tags: [Innovation]
+      responses: { '201': { description: Application }, '422': { description: Cap/employment rejection } }
+    get:
+      summary: List mortgage applications (optional member_id)
+      tags: [Innovation]
+      parameters:
+        - { name: member_id, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Applications } }
+  /v1/mortgage/decisions:
+    post:
+      summary: Approve/reject/disburse a mortgage application
+      tags: [Innovation]
+      responses: { '200': { description: Application } }
+  /v1/claimsfast/packs:
+    post:
+      summary: Open a 48-hour straight-through benefit claim pack
+      tags: [Innovation]
+      responses: { '201': { description: Pack } }
+    get:
+      summary: Get claim pack readiness (rsa_id)
+      tags: [Innovation]
+      parameters:
+        - { name: rsa_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Pack } }
+  /v1/claimsfast/complete:
+    post:
+      summary: Mark a pack item complete; re-scores STP eligibility
+      tags: [Innovation]
+      responses: { '200': { description: Pack } }
+  /v1/succession/nominations:
+    post:
+      summary: Nominate beneficiaries (shares must total 100%; versioned WORM history)
+      tags: [Innovation]
+      responses: { '201': { description: Nomination } }
+    get:
+      summary: Current nomination for a member (member_id)
+      tags: [Innovation]
+      parameters:
+        - { name: member_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Nomination } }
+  /v1/succession/due:
+    get:
+      summary: Members due for nomination liveness re-confirmation
+      tags: [Innovation]
+      responses: { '200': { description: Member IDs } }
+  /v1/fraud/screen:
+    post:
+      summary: Real-time transaction anomaly scoring; opens case at threshold
+      tags: [Innovation]
+      responses: { '200': { description: Score + signals + optional case } }
+  /v1/fraud/cases:
+    get:
+      summary: Fraud case queue (open=1 for open only)
+      tags: [Innovation]
+      parameters:
+        - { name: open, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Cases } }
+  /v1/fraud/resolve:
+    post:
+      summary: Resolve a case (CONFIRMED_FRAUD | CLEARED)
+      tags: [Innovation]
+      responses: { '200': { description: Case } }
+  /v1/readiness/reports:
+    post:
+      summary: Compute employer workforce retirement-readiness index (0-100 + grade)
+      tags: [Innovation]
+      responses: { '201': { description: Report } }
+    get:
+      summary: Employer readiness history (employer_id)
+      tags: [Innovation]
+      parameters:
+        - { name: employer_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Reports } }
+  /v1/diaspora/members:
+    post:
+      summary: Enrol a diaspora member (passport tier)
+      tags: [Innovation]
+      responses: { '201': { description: Member } }
+  /v1/diaspora/rates:
+    post:
+      summary: Set FCY booking rate (kobo per unit; USD|GBP|EUR)
+      tags: [Innovation]
+      responses: { '200': { description: Updated } }
+  /v1/diaspora/contributions:
+    post:
+      summary: Book an FCY remittance into the RSA (FX converted to kobo)
+      tags: [Innovation]
+      responses: { '201': { description: Contribution } }
+    get:
+      summary: Diaspora contributions + kobo total (rsa_id)
+      tags: [Innovation]
+      parameters:
+        - { name: rsa_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Contributions } }
+  /v1/agents:
+    post:
+      summary: Accredit a pension agent (informal-sector channel)
+      tags: [Innovation]
+      responses: { '201': { description: Agent } }
+  /v1/agents/enrolments:
+    post:
+      summary: Record an agent-originated micro-pension enrolment
+      tags: [Innovation]
+      responses: { '201': { description: Enrolment } }
+  /v1/agents/commissions:
+    post:
+      summary: Book an agent commission (WORM ledger)
+      tags: [Innovation]
+      responses: { '201': { description: Commission } }
+  /v1/agents/leaderboard:
+    get:
+      summary: Agent enrolment leaderboard
+      tags: [Innovation]
+      responses: { '200': { description: Leaderboard } }
+  /v1/embedded/keys:
+    post:
+      summary: Issue a scoped API key (token returned once; hash stored)
+      tags: [Innovation]
+      responses: { '201': { description: Key + one-time token } }
+  /v1/embedded/webhooks:
+    post:
+      summary: Subscribe a webhook to platform events
+      tags: [Innovation]
+      responses: { '201': { description: Webhook } }
+  /v1/embedded/dispatch:
+    post:
+      summary: Fan an event out to matching webhooks
+      tags: [Innovation]
+      responses: { '200': { description: Deliveries } }
+  /v1/regfile/filings:
+    post:
+      summary: Schedule a PenCom filing obligation
+      tags: [Innovation]
+      responses: { '201': { description: Filing } }
+    get:
+      summary: List filings
+      tags: [Innovation]
+      responses: { '200': { description: Filings } }
+  /v1/regfile/generate:
+    post:
+      summary: Generate a filing payload (PENDING/LATE -> GENERATED)
+      tags: [Innovation]
+      responses: { '200': { description: Filing } }
+  /v1/regfile/file:
+    post:
+      summary: Mark filed; late filings accrue PRA s.11 penalty (2%/month)
+      tags: [Innovation]
+      responses: { '200': { description: Filing + penalty } }
+  /v1/esg/reports:
+    post:
+      summary: Record impact metrics for an infrastructure deployment
+      tags: [Innovation]
+      responses: { '201': { description: Metrics } }
+  /v1/esg/rollup:
+    get:
+      summary: ESG/impact rollup for a mandate (mandate_id) with grade
+      tags: [Innovation]
+      parameters:
+        - { name: mandate_id, in: query, required: true, schema: { type: string } }
+      responses: { '200': { description: Rollup } }
 components:
   securitySchemes:
     tenantHeader:

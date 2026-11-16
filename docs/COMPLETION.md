@@ -363,6 +363,48 @@ PASS; live smoke with `DATABASE_URL` (eligibility rejection at floor,
 cap breach rejection, over-deployment rejection) and full restart
 durability read-back.
 
+## Tranche 17 delivered — 15 market-leadership innovations
+
+Fifteen new engines (integer kobo, tenant-scoped, fully unit-tested),
+45 new member-svc endpoints, migration 0007 with WORM enforcement on the
+agent-commission ledger and nomination version history, and
+store.InnovateRepo write-through persistence for the stateful domains:
+
+1. advisory — retirement-adequacy projections (gap + recommended extra
+   contribution, binary-search minimal, integer compounding)
+2. escalation — contribution auto-escalation with audited opt-out
+3. roundup — round-up micro-AVC with monthly caps
+4. glidepath — PenCom multi-fund lifecycle (Fund I-IV, age-band auto
+   switches, Fund I election lapses at 50)
+5. literacy — localized lesson/quiz engine (en, pcm, ha, yo, ig)
+6. mortgage — PRA s.89(2) 25% RSA mortgage equity (cap + employment
+   enforced, SUBMITTED->APPROVED->DISBURSED)
+7. claimsfast — 48-hour straight-through benefit readiness scoring
+8. succession — beneficiary vault, shares-must-total-100%, versioned
+   WORM history, liveness reconfirmation schedule
+9. fraud — real-time anomaly scoring (velocity, 5x outlier, channel
+   flip, geo jump, dormant-then-large) with auto-opened case queue
+10. readiness — employer retirement-readiness index (timeliness 40% /
+    coverage 30% / adequacy 30%) with A-D grades
+11. diaspora — passport-tier onboarding + FCY contributions (USD/GBP/EUR)
+    with integer FX booking
+12. agents — accredited pension-agent network (informal-sector channel),
+    batch enrolment, WORM commission ledger, leaderboard
+13. embedded — scoped API keys (SHA-256 hashed, token shown once) +
+    webhook subscriptions + dispatch audit
+14. regfile — PenCom filing calendar, payload generation, PRA s.11
+    lateness penalty guard (2% per started month)
+15. esg — impact/ESG reporting per infrastructure deployment, mandate
+    rollups with grades (closes the loop on invmandate)
+
+Verification: 15 engine test suites + store round-trip incl. WORM
+rejection on both new ledgers; 63 Go packages green; 4/4 Rust; e2e.sh +
+e2e-onboarding.sh PASS; live smoke of all 15 (25% mortgage cap rejected
+over-cap, fraud case auto-opened score 100 with 4 signals, diaspora FX
+exact at $500->N765,000, agent commission 2.5%=N500, regfile 2-month-late
+penalty N40,000, ESG grade A); restart durability on persisted domains
+(fraud cases, mortgage status, escalation post-tick rate, nominations).
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the
