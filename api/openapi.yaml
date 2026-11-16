@@ -263,6 +263,31 @@ paths:
       summary: Register signed webhook endpoint (kyc.verified, contribution.posted, claim.decided, transfer.state.changed)
       tags: [Partner APIs]
       responses: { '201': { description: Registered } }
+  /v1/mpg/floor:
+    get:
+      summary: Current Minimum Pension Guarantee floor (₦52,500, PRA s.84) with actuarial-review metadata
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: MPG floor + review schedule } }
+  /v1/mpg/assessments:
+    post:
+      summary: Run MPG top-up assessment over a retiree payroll batch (PPF-funded top-ups; state gating)
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: Assessments + total top-up } }
+    get:
+      summary: List MPG assessments for a payroll period
+      tags: [Benefits & Transfers]
+      parameters:
+        - { name: period, in: query, required: false, schema: { type: string } }
+      responses: { '200': { description: Assessments } }
+  /v1/ppf/contributions:
+    post:
+      summary: Record a Pension Protection Fund contribution (FG | INDUSTRY | STATE | EMPLOYER; WORM ledger)
+      tags: [Benefits & Transfers]
+      responses: { '201': { description: Recorded } }
+    get:
+      summary: PPF ledger with per-source aggregates
+      tags: [Benefits & Transfers]
+      responses: { '200': { description: Contributions + aggregates } }
 components:
   securitySchemes:
     tenantHeader:

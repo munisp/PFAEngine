@@ -30,6 +30,7 @@ import (
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/micropension"
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/mpg"
 	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
@@ -58,6 +59,13 @@ type deps struct {
 	onbPayloads map[string]onboardPayload
 	microMu     sync.Mutex
 	micro       map[string]*micropension.Account
+	// Tranche 15a: MPG (₦52,500 minimum pension guarantee, PRA s.84) +
+	// PPF contribution ledger. mpgRepo is nil unless DATABASE_URL is set;
+	// mpgAssess caches assessments for the in-memory read path.
+	mpgEngine *mpg.Engine
+	mpgRepo   *store.MPGRepo
+	mpgMu     sync.Mutex
+	mpgAssess []mpg.Assessment
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -72,6 +80,7 @@ func main() {
 	// behaviour).
 	var onbRepo onboarding.Repo
 	var prefsRepo prefs.Repo
+	var mpgRepo *store.MPGRepo
 	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
 		db, err := store.Open(context.Background(), dsn)
 		if err != nil {
@@ -80,7 +89,8 @@ func main() {
 		defer db.Close()
 		onbRepo = store.NewOnboardingRepo(db)
 		prefsRepo = store.NewPrefsRepo(db)
-		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs persist to Postgres")
+		mpgRepo = store.NewMPGRepo(db)
+		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg persist to Postgres")
 	}
 	d := &deps{
 		kyc: kyc.NewService(salt,
@@ -97,6 +107,8 @@ func main() {
 		onb:         onboarding.NewPersistentStore(onboarding.NewStore(aud), onbRepo),
 		onbPayloads: map[string]onboardPayload{},
 		micro:       map[string]*micropension.Account{},
+		mpgEngine:   mpg.NewEngine(),
+		mpgRepo:     mpgRepo,
 		stmtSecret:  []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
@@ -130,6 +142,11 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/onboarding/{id}/approve", func(d *deps) http.HandlerFunc { return d.approveOnboarding }},
 	{"POST", "/api/v1/onboarding/{id}/reject", func(d *deps) http.HandlerFunc { return d.rejectOnboarding }},
 	{"GET", "/api/v1/audit/export", func(d *deps) http.HandlerFunc { return d.auditExport }},
+	{"GET", "/api/v1/mpg/floor", func(d *deps) http.HandlerFunc { return d.mpgFloor }},
+	{"POST", "/api/v1/ppf/contributions", func(d *deps) http.HandlerFunc { return d.createPPFContribution }},
+	{"GET", "/api/v1/ppf/contributions", func(d *deps) http.HandlerFunc { return d.listPPF }},
+	{"POST", "/api/v1/mpg/assessments", func(d *deps) http.HandlerFunc { return d.assessMPG }},
+	{"GET", "/api/v1/mpg/assessments", func(d *deps) http.HandlerFunc { return d.listMPG }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for
