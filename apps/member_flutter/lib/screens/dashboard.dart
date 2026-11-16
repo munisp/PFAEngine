@@ -5,6 +5,7 @@ import 'grow.dart';
 import 'funds.dart';
 import 'claims.dart';
 import 'family.dart';
+import 'support.dart';
 
 /// Member dashboard: balance, transactions, QR-verifiable statement (FR-501),
 /// I-Am-Alive status (FR-108).
@@ -58,6 +59,8 @@ class DashboardScreen extends StatelessWidget {
                   ClaimsScreen(api: api, rsaId: 'demo-rsa')),
               _navChip(context, Icons.family_restroom, 'Family',
                   FamilyScreen(api: api, memberId: 'demo-rsa')),
+              _navChip(context, Icons.support_agent, 'Support',
+                  SupportScreen(api: api, memberId: 'demo-rsa')),
             ]),
           ]);
         },

@@ -4,6 +4,7 @@ package main
 // readiness handlers.
 
 import (
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -110,7 +111,16 @@ func (d *deps) claimsOpen(w http.ResponseWriter, r *http.Request) {
 		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
 		return
 	}
-	httpsrv.WriteJSON(w, 201, d.claimsfast.Open(httpsrv.TenantOf(r), in.RSAID, time.Now()))
+	tenant := httpsrv.TenantOf(r)
+	pack := d.claimsfast.Open(tenant, in.RSAID, time.Now())
+	// Tranche 20: claims open a unified BENEFITS-queue case so SLA tracking
+	// and assignment apply to every pack.
+	if d.cases != nil {
+		if _, _, err := d.cases.OpenClaimCase(tenant, in.RSAID, in.RSAID, ""); err != nil {
+			log.Printf("casemgmt: claim auto-case failed: %v", err)
+		}
+	}
+	httpsrv.WriteJSON(w, 201, pack)
 }
 
 func (d *deps) claimsComplete(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +220,13 @@ func (d *deps) fraudScreen(w http.ResponseWriter, r *http.Request) {
 	}
 	if c != nil {
 		d.audit.Append(audit.Record{TenantID: tenant, Actor: "member-svc", Action: "fraud.case.opened", EntityType: "fraud_case", EntityID: c.ID, After: map[string]any{"case": c}})
+		// Tranche 20: every fraud case also opens a unified ops case so the
+		// investigation lives in the workbench with SLA + assignment.
+		if d.cases != nil {
+			if _, _, err := d.cases.OpenFraudAlert(tenant, c.MemberID, c.ID, c.Score, c.Signals, false); err != nil {
+				log.Printf("casemgmt: fraud auto-case failed: %v", err)
+			}
+		}
 	}
 	httpsrv.WriteJSON(w, 200, map[string]any{"score": score, "signals": signals, "case": c})
 }

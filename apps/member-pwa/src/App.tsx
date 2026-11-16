@@ -15,9 +15,10 @@ import Home from './views/Home'
 import Learn from './views/Learn'
 import Login from './views/Login'
 import Statement from './views/Statement'
+import Support from './views/Support'
 
 type View = 'dashboard' | 'grow' | 'funds' | 'family' | 'more'
-  | 'statement' | 'alive' | 'claims' | 'home' | 'learn'
+  | 'statement' | 'alive' | 'claims' | 'home' | 'learn' | 'support'
 
 const LOCALE_KEY = 'pfa.locale'
 
@@ -67,6 +68,7 @@ export default function App() {
     { id: 'claims', key: 'nav.claims' },
     { id: 'home', key: 'nav.home' },
     { id: 'learn', key: 'nav.learn' },
+    { id: 'support', key: 'nav.support' },
   ]
 
   return (
@@ -102,6 +104,7 @@ export default function App() {
           {view === 'claims' && <Claims api={api} session={session} locale={locale} />}
           {view === 'home' && <Home api={api} session={session} locale={locale} />}
           {view === 'learn' && <Learn api={api} session={session} locale={locale} />}
+          {view === 'support' && <Support api={api} session={session} locale={locale} />}
           {view === 'more' && (
             <main className="view">
               <h2>{t(locale, 'nav.more')}</h2>

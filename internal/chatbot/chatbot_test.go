@@ -37,6 +37,11 @@ func TestClassifyMatrix(t *testing.T) {
 		{"who is my next of kin", IntentNominee},
 		{"add my wife as beneficiary", IntentNominee},
 		{"teach me how pension work", IntentLearn},
+		{"I want to complain about my missing contribution", IntentComplaint},
+		{"I no happy with this delay", IntentComplaint},
+		{"wetin happen to my case cs-000123", IntentCaseStatus},
+		{"what is my complaint status", IntentCaseStatus},
+		{"track my case", IntentCaseStatus},
 		{"I want to switch PFA", IntentTransferStatus},
 		{"hello there", IntentUnknown},
 		{"", IntentUnknown},
@@ -71,6 +76,8 @@ func TestUSSDMapping(t *testing.T) {
 		{IntentStatement, "3"},
 		{IntentIAmAlive, "4"},
 		{IntentTransferStatus, "5"},
+		{IntentComplaint, "13"},
+		{IntentCaseStatus, "14"},
 		{IntentUnknown, ""},
 	}
 	for _, c := range cases {

@@ -23,8 +23,10 @@ import (
 	"github.com/munisp/pfaengine/internal/agents"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
+	"github.com/munisp/pfaengine/internal/casemgmt"
 	"github.com/munisp/pfaengine/internal/claimsfast"
 	"github.com/munisp/pfaengine/internal/contribution"
+	"github.com/munisp/pfaengine/internal/crm"
 	"github.com/munisp/pfaengine/internal/diaspora"
 	"github.com/munisp/pfaengine/internal/embedded"
 	"github.com/munisp/pfaengine/internal/escalation"
@@ -111,6 +113,12 @@ type deps struct {
 	// ml is the FraudFusion inference client (nil when ML_SCORE_URL unset —
 	// fail-closed to the rules engine).
 	ml *mlscore.Client
+	// Tranche 20: unified case management engine + CRM layer. caseRepo is
+	// nil unless DATABASE_URL is set; the casemgmt engine write-through
+	// persists every mutation and rehydrates on boot.
+	cases    *casemgmt.Engine
+	crm      *crm.Engine
+	caseRepo *store.CaseRepo
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -136,6 +144,7 @@ func main() {
 	var pencareRepo *store.PenCareRepo
 	var invmandateRepo *store.InvMandateRepo
 	var innovateRepo *store.InnovateRepo
+	var caseRepo *store.CaseRepo
 	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
 		db, err := store.Open(context.Background(), dsn)
 		if err != nil {
@@ -148,11 +157,13 @@ func main() {
 		pencareRepo = store.NewPenCareRepo(db)
 		invmandateRepo = store.NewInvMandateRepo(db)
 		innovateRepo = store.NewInnovateRepo(db)
-		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate + innovations persist to Postgres")
+		caseRepo = store.NewCaseRepo(db)
+		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate + innovations + casemgmt persist to Postgres")
 	}
 	mpgEngine := mpg.NewEngine()
 	literacyEngine := literacy.NewEngine()
 	literacyEngine.Seed()
+	caseEngine := casemgmt.New(caseRepo)
 	d := &deps{
 		kyc: kyc.NewService(salt,
 			kyc.MockProvider{ProviderName: "mock-nimc"},
@@ -191,7 +202,37 @@ func main() {
 		innovateRepo:   innovateRepo,
 		stmtSecret:     []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 		ml:             mlClientFromEnv(),
+		cases:          caseEngine,
+		caseRepo:       caseRepo,
 	}
+	d.crm = crm.New(caseEngine, d.memberFacts)
+	// Rehydrate persisted cases for configured tenants (boot warm-up).
+	// CASEMGMT_TENANTS is a comma-separated tenant list; defaults to the
+	// DEFAULT_TENANT (or "demo").
+	if caseRepo != nil {
+		tenantList := httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo"))
+		n := 0
+		for _, t := range strings.Split(tenantList, ",") {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			if rows, err := caseRepo.Cases(context.Background(), t); err == nil {
+				for _, c := range rows {
+					caseEngine.Load(c)
+					n++
+				}
+			}
+		}
+		log.Printf("member-svc: casemgmt rehydrated %d cases across [%s]", n, tenantList)
+	}
+	// Default staff rosters (round-robin auto-assignment); override via
+	// POST /api/v1/cases/roster.
+	caseEngine.SetRoster(casemgmt.QueueFraudOps, []string{"fraud-ops-1", "fraud-ops-2"})
+	caseEngine.SetRoster(casemgmt.QueueMemberServices, []string{"cs-1", "cs-2", "cs-3"})
+	caseEngine.SetRoster(casemgmt.QueueBenefits, []string{"benefits-1"})
+	caseEngine.SetRoster(casemgmt.QueueCompliance, []string{"compliance-1"})
+	caseEngine.SetRoster(casemgmt.QueueOperations, []string{"ops-1"})
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
 	log.Fatal(srv.Run())
 }
@@ -293,6 +334,32 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/regfile/file", func(d *deps) http.HandlerFunc { return d.regfileFile }},
 	{"POST", "/api/v1/esg/reports", func(d *deps) http.HandlerFunc { return d.esgReport }},
 	{"GET", "/api/v1/esg/rollup", func(d *deps) http.HandlerFunc { return d.esgRollup }},
+	// Tranche 20: unified case management + CRM
+	{"GET", "/api/v1/cases", func(d *deps) http.HandlerFunc { return d.casesList }},
+	{"POST", "/api/v1/cases", func(d *deps) http.HandlerFunc { return d.casesOpen }},
+	{"GET", "/api/v1/cases/stats", func(d *deps) http.HandlerFunc { return d.caseStats }},
+	{"POST", "/api/v1/cases/sweep", func(d *deps) http.HandlerFunc { return d.caseSweep }},
+	{"POST", "/api/v1/cases/roster", func(d *deps) http.HandlerFunc { return d.casesRoster }},
+	{"GET", "/api/v1/cases/{id}", func(d *deps) http.HandlerFunc { return d.caseGet }},
+	{"POST", "/api/v1/cases/{id}/transition", func(d *deps) http.HandlerFunc { return d.caseTransition }},
+	{"POST", "/api/v1/cases/{id}/assign", func(d *deps) http.HandlerFunc { return d.caseAssign }},
+	{"POST", "/api/v1/cases/{id}/comments", func(d *deps) http.HandlerFunc { return d.caseComment }},
+	{"POST", "/api/v1/cases/{id}/tasks", func(d *deps) http.HandlerFunc { return d.caseAddTask }},
+	{"POST", "/api/v1/cases/{id}/tasks/{taskId}/complete", func(d *deps) http.HandlerFunc { return d.caseCompleteTask }},
+	{"POST", "/api/v1/cases/{id}/link", func(d *deps) http.HandlerFunc { return d.caseLink }},
+	{"POST", "/api/v1/cases/{id}/resolve", func(d *deps) http.HandlerFunc { return d.caseResolve }},
+	{"POST", "/api/v1/cases/{id}/escalate", func(d *deps) http.HandlerFunc { return d.caseEscalate }},
+	{"POST", "/api/v1/cases/{id}/csat", func(d *deps) http.HandlerFunc { return d.caseRate }},
+	{"GET", "/api/v1/members/{id}/cases", func(d *deps) http.HandlerFunc { return d.memberCases }},
+	{"POST", "/api/v1/members/{id}/cases", func(d *deps) http.HandlerFunc { return d.memberRaiseCase }},
+	{"GET", "/api/v1/crm/members/{id}/360", func(d *deps) http.HandlerFunc { return d.crmMember360 }},
+	{"POST", "/api/v1/crm/interactions", func(d *deps) http.HandlerFunc { return d.crmRecordInteraction }},
+	{"GET", "/api/v1/crm/members/{id}/timeline", func(d *deps) http.HandlerFunc { return d.crmTimeline }},
+	{"GET", "/api/v1/crm/segments/{tag}/members", func(d *deps) http.HandlerFunc { return d.crmSegmentMembers }},
+	{"GET", "/api/v1/crm/campaigns", func(d *deps) http.HandlerFunc { return d.crmCampaigns }},
+	{"POST", "/api/v1/crm/campaigns", func(d *deps) http.HandlerFunc { return d.crmCampaigns }},
+	{"POST", "/api/v1/crm/campaigns/{id}/launch", func(d *deps) http.HandlerFunc { return d.crmLaunchCampaign }},
+	{"GET", "/api/v1/crm/complaints/register", func(d *deps) http.HandlerFunc { return d.crmComplaintsRegister }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for
@@ -649,6 +716,21 @@ func (d *deps) uploadContributions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	res := d.recon.Reconcile(sched, receipts)
+
+	// Tranche 20: new recon breaks auto-open OPERATIONS-queue cases so
+	// unmatched contributions get SLA-tracked investigation, not just a
+	// passive exception list.
+	if res.ExceptionCnt > 0 && d.cases != nil {
+		for _, ex := range d.recon.Exceptions(tenant) {
+			diff := int64(ex.Expected) - int64(ex.Received)
+			if diff < 0 {
+				diff = -diff
+			}
+			if _, _, err := d.cases.OpenReconBreak(tenant, ex.ID, employer, diff); err != nil {
+				log.Printf("casemgmt: recon auto-case failed: %v", err)
+			}
+		}
+	}
 
 	// Post auto-matched lines (exact PIN + amount) to the ledger.
 	byPIN := map[string]money.Kobo{}

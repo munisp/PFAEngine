@@ -183,6 +183,38 @@ export class Api {
   diasporaList(rsaId: string) {
     return this.req<{ contributions: DiasporaContribution[]; total_kobo: number }>('GET', `/api/v1/diaspora/contributions?rsa_id=${encodeURIComponent(rsaId)}`);
   }
+
+  // ---- Tranche 20: case management + CRM (member self-service) ----
+  myCases(memberId: string) {
+    return this.req<{ cases: MemberCase[] }>('GET', `/api/v1/members/${encodeURIComponent(memberId)}/cases`);
+  }
+  raiseCase(memberId: string, type: 'COMPLAINT' | 'SERVICE_REQUEST' | 'GENERAL', subject: string, description: string, channel = 'WEB') {
+    return this.req<{ case: MemberCase; merged: boolean }>(
+      'POST',
+      `/api/v1/members/${encodeURIComponent(memberId)}/cases?channel=${channel}`,
+      { type, subject, description },
+    );
+  }
+  rateCase(caseId: string, score: number) {
+    return this.req<MemberCase>('POST', `/api/v1/cases/${encodeURIComponent(caseId)}/csat`, { score });
+  }
+}
+
+export interface MemberCase {
+  id: string;
+  type: string;
+  subject: string;
+  description: string;
+  status: string;
+  priority: string;
+  source: string;
+  created_at: string;
+  due_at: string;
+  sla_breached: boolean;
+  resolution?: string;
+  resolution_code?: string;
+  csat?: number;
+  comments?: { author: string; body: string; at: string }[];
 }
 
 /** formatNaira renders integer kobo as ₦ currency (no floats in the API). */

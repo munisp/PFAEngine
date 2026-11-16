@@ -20,12 +20,14 @@
   "chat.statement": "Your statement is ready in the app or via email. Dial *789# and press 3.",
   "chat.i_am_alive": "To confirm you are alive, open the app and complete the liveness check, or dial *789# and press 4.",
   "chat.transfer_status": "RSA transfers complete within 365 days of your request. Dial *789# and press 5 for status.",
-  "chat.unknown": "Sorry, I did not understand. Try: balance, contribution, statement, alive, transfer, projection, grow, fund, mortgage, claim, nominee, or learn.",
+  "chat.unknown": "Sorry, I did not understand. Try: balance, contribution, statement, alive, transfer, projection, grow, fund, mortgage, claim, nominee, learn, complaint, or case status.",
   "chat.projection": "See your retirement projection in the app (Grow tab) or dial *789# and press 6.",
   "chat.grow": "Increase your savings with auto-escalation or round-ups in the app (Grow tab), or dial *789# and press 7.",
   "chat.fund_choice": "Change your fund (I-IV) in the app under Funds, or dial *789# and press 8.",
   "chat.mortgage": "You can use up to 25% of your RSA as mortgage equity. Apply in the app (Home tab) or dial *789# and press 9.",
   "chat.claims": "Start your retirement claim in the app (Claims tab) — fast-track completes in days. Or dial *789# and press 10.",
   "chat.nominee": "Update your next-of-kin nominations in the app (Family tab) or dial *789# and press 11.",
-  "chat.learn": "Learn about pensions in your language in the app (Learn tab) or dial *789# and press 12."
+  "chat.learn": "Learn about pensions in your language in the app (Learn tab) or dial *789# and press 12.",
+  "chat.complaint": "Sorry about the trouble. Tell me what happened in one message and I will open a complaint case for you right away — you will get a case number to track it. Or dial *789# and press 13.",
+  "chat.case_status": "Send your case number (e.g. cs-000123) and I will tell you the status. You can also see all your cases in the app under Support, or dial *789# and press 14."
 }

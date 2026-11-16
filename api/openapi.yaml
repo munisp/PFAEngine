@@ -630,6 +630,129 @@ paths:
       parameters:
         - { name: mandate_id, in: query, required: true, schema: { type: string } }
       responses: { '200': { description: Rollup } }
+  # ---- Tranche 20: unified case management + CRM ----
+  /v1/cases:
+    get:
+      summary: List cases (filters — status,type,queue,assignee,member_id,open,breached)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Cases } }
+    post:
+      summary: Open a case manually (staff)
+      tags: [CaseMgmt]
+      responses: { '201': { description: Case } }
+  /v1/cases/stats:
+    get:
+      summary: Queue health stats (open/breached/aging/CSAT)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Stats } }
+  /v1/cases/sweep:
+    post:
+      summary: SLA breach sweep — flags overdue cases and fires breach events
+      tags: [CaseMgmt]
+      responses: { '200': { description: Breached cases } }
+  /v1/cases/roster:
+    post:
+      summary: Set round-robin staff roster for a queue
+      tags: [CaseMgmt]
+      responses: { '200': { description: OK } }
+  /v1/cases/{id}:
+    get:
+      summary: Case detail (comments, tasks, attachments, event log)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/transition:
+    post:
+      summary: Move case to a new lifecycle status (state machine enforced)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/assign:
+    post:
+      summary: Assign/reassign case (optionally moving queues)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/comments:
+    post:
+      summary: Add a staff/member comment
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/tasks:
+    post:
+      summary: Add a checklist task
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/tasks/{taskId}/complete:
+    post:
+      summary: Mark a checklist task done
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/link:
+    post:
+      summary: Link two related cases (e.g. fraud ring)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/resolve:
+    post:
+      summary: Resolve with outcome code (blocked while tasks outstanding)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/escalate:
+    post:
+      summary: Escalate — bumps priority one band and re-arms the SLA clock
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/cases/{id}/csat:
+    post:
+      summary: Member post-resolution satisfaction rating (1-5)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Case } }
+  /v1/members/{id}/cases:
+    get:
+      summary: Member's own cases (self-service tracking)
+      tags: [CaseMgmt]
+      responses: { '200': { description: Cases } }
+    post:
+      summary: Member raises a COMPLAINT / SERVICE_REQUEST / GENERAL case
+      tags: [CaseMgmt]
+      responses: { '201': { description: Case } }
+  /v1/crm/members/{id}/360:
+    get:
+      summary: Member 360 view — facts, segments, open cases, timeline, CSAT
+      tags: [CRM]
+      responses: { '200': { description: Member360 } }
+  /v1/crm/interactions:
+    post:
+      summary: Record an omnichannel interaction on the member timeline
+      tags: [CRM]
+      responses: { '201': { description: Interaction } }
+  /v1/crm/members/{id}/timeline:
+    get:
+      summary: Member interaction timeline (newest first)
+      tags: [CRM]
+      responses: { '200': { description: Timeline } }
+  /v1/crm/segments/{tag}/members:
+    get:
+      summary: Members matching a segment tag (DORMANT|HIGH_VALUE|...)
+      tags: [CRM]
+      responses: { '200': { description: Members } }
+  /v1/crm/campaigns:
+    get:
+      summary: List campaigns
+      tags: [CRM]
+      responses: { '200': { description: Campaigns } }
+    post:
+      summary: Draft a segment-targeted campaign
+      tags: [CRM]
+      responses: { '201': { description: Campaign } }
+  /v1/crm/campaigns/{id}/launch:
+    post:
+      summary: Launch campaign — resolves segment membership and logs outbound touches
+      tags: [CRM]
+      responses: { '200': { description: Campaign } }
+  /v1/crm/complaints/register:
+    get:
+      summary: PenCom quarterly complaints register (from,to query dates)
+      tags: [CRM]
+      responses: { '200': { description: Register } }
 components:
   securitySchemes:
     tenantHeader:

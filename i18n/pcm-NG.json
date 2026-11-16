@@ -20,12 +20,14 @@
   "chat.statement": "Your statement don ready for the app or email. Dial *789# press 3.",
   "chat.i_am_alive": "To confirm say you dey alive, open the app do liveness check, or dial *789# press 4.",
   "chat.transfer_status": "RSA transfer dey complete within 365 days of your request. Dial *789# press 5 for status.",
-  "chat.unknown": "Sorry, I no understand. Try: balance, contribution, statement, alive, transfer, projection, grow, fund, mortgage, claim, nominee, or learn.",
+  "chat.unknown": "Sorry, I no understand. Try: balance, contribution, statement, alive, transfer, projection, grow, fund, mortgage, claim, nominee, learn, complaint, or case status.",
   "chat.projection": "See your retirement projection for the app (Grow tab) or dial *789# press 6.",
   "chat.grow": "You fit increase your savings with auto-escalation or round-up for the app (Grow tab), or dial *789# press 7.",
   "chat.fund_choice": "Change your fund (I-IV) for the app under Funds, or dial *789# press 8.",
   "chat.mortgage": "You fit use up to 25% of your RSA for mortgage equity. Apply for the app (Home tab) or dial *789# press 9.",
   "chat.claims": "Start your retirement claim for the app (Claims tab) — fast-track dey finish in days. Or dial *789# press 10.",
   "chat.nominee": "Update your next-of-kin for the app (Family tab) or dial *789# press 11.",
-  "chat.learn": "Learn about pension for your language for the app (Learn tab) or dial *789# press 12."
+  "chat.learn": "Learn about pension for your language for the app (Learn tab) or dial *789# press 12.",
+  "chat.complaint": "Sorry for the wahala. Tell me wetin happen for one message and I go open complaint case for you sharp sharp — you go get case number to track am. Or dial *789# press 13.",
+  "chat.case_status": "Send your case number (like cs-000123) and I go tell you the status. You fit see all your cases for the app under Support, or dial *789# press 14."
 }

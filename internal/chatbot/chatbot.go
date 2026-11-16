@@ -28,6 +28,10 @@ const (
 	IntentClaims     // claimsfast: retirement claims
 	IntentNominee    // succession: beneficiary nominations
 	IntentLearn      // literacy centre
+	// Tranche 20: case management + CRM intents — members raise complaints
+	// and track case status from WhatsApp/USSD/chat.
+	IntentComplaint  // raise a complaint (opens a COMPLAINT ops case)
+	IntentCaseStatus // track an existing case by id
 	IntentUnknown
 )
 
@@ -45,6 +49,8 @@ var intentKey = map[Intent]string{
 	IntentClaims:           "chat.claims",
 	IntentNominee:          "chat.nominee",
 	IntentLearn:            "chat.learn",
+	IntentComplaint:        "chat.complaint",
+	IntentCaseStatus:       "chat.case_status",
 	IntentUnknown:          "chat.unknown",
 }
 
@@ -75,6 +81,8 @@ var rules = []keywordRule{
 	{IntentClaims, []string{"retirement claim", "claim my pension", "retire", "benefit claim", "withdraw my pension"}},
 	{IntentNominee, []string{"next of kin", "nominee", "beneficiary", "who go inherit"}},
 	{IntentLearn, []string{"learn about pension", "teach me", "financial literacy", "how pension work", "learn"}},
+	{IntentComplaint, []string{"i want to complain", "make a complaint", "lodge a complaint", "i no happy", "this no fair", "wahala", "report a problem", "complaint"}},
+	{IntentCaseStatus, []string{"my case status", "case status", "track my case", "my ticket", "complaint status", "wetin happen to my case"}},
 }
 
 // Classify returns the intent for msg using longest-keyword-first
@@ -147,6 +155,10 @@ func USSDCode(i Intent) string {
 		return "11"
 	case IntentLearn:
 		return "12"
+	case IntentComplaint:
+		return "13"
+	case IntentCaseStatus:
+		return "14"
 	}
 	return ""
 }

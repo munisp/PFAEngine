@@ -6,6 +6,8 @@ import AuditExport from './views/AuditExport';
 import FraudCases from './views/FraudCases';
 import Agents from './views/Agents';
 import Compliance from './views/Compliance';
+import Cases from './views/Cases';
+import CRM from './views/CRM';
 
 // Staff operations portal: reconciliation exceptions, claims maker-checker,
 // audit export (dual control) — the compliance cockpit (BR-09, FR-502).
@@ -15,7 +17,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [token, setToken] = useState<string>();
-  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance'>('recon');
+  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance' | 'cases' | 'crm'>('cases');
   const [error, setError] = useState('');
 
   const api = new Api(import.meta.env.VITE_API_BASE ?? 'http://localhost:8080', tenantId, token);
@@ -53,6 +55,8 @@ export default function App() {
       <header style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
         <h1>PFAEngine Ops — {tenantId}</h1>
         <nav style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setView('cases')}>Cases</button>
+          <button onClick={() => setView('crm')}>CRM</button>
           <button onClick={() => setView('recon')}>Reconciliation</button>
           <button onClick={() => setView('claims')}>Claims</button>
           <button onClick={() => setView('audit')}>Audit export</button>
@@ -61,6 +65,8 @@ export default function App() {
           <button onClick={() => setView('compliance')}>Compliance</button>
         </nav>
       </header>
+      {view === 'cases' && <Cases api={api} />}
+      {view === 'crm' && <CRM api={api} />}
       {view === 'recon' && <ReconQueue api={api} />}
       {view === 'claims' && <ClaimsQueue api={api} />}
       {view === 'audit' && <AuditExport api={api} />}

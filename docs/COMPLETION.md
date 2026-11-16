@@ -452,6 +452,32 @@ into every member/staff surface:
 - **Staff portal**: FraudCases (queue + confirm/clear), Agents (leaderboard),
   Compliance (regfile lifecycle + readiness index with inputs). Build clean.
 
+## Tranche 20 — Unified case management + CRM (2026-11-17)
+
+Audit verdict: case management was NOT robust/integrated (fraud-only silo, no
+SLA/assignment/tasks; no complaints; no CRM at all). Implemented the
+next-generation engine:
+
+- internal/casemgmt: 9 case types, enforced state machine, P1-P4 SLA matrix
+  with breach sweep + escalation, 5 queues with round-robin auto-assignment,
+  dedup/merge, comments, checklist tasks (resolution blocked until done),
+  attachments, case linking, CSAT 1-5, append-only event log, stats.
+- internal/crm: member 360 (facts + segments + cases + timeline + CSAT),
+  omnichannel interaction timeline (9 channels), rule-based segmentation
+  (8 segments), campaigns launched against live segment membership, PenCom
+  quarterly complaints register.
+- member-svc: 25 routes (staff workbench, member self-service, CRM), all in
+  api/openapi.yaml (contract test passes). Auto-case hooks wired from fraud
+  rules engine, ML fraud screen, claims packs and recon breaks.
+- Persistence: store.CaseRepo + db/migrations/0008_casemgmt_crm.sql
+  (write-through upsert, boot rehydration via CASEMGMT_TENANTS).
+- Surfaces: staff-portal Cases workbench + CRM view; member-pwa Support view
+  (raise/track/rate); Flutter Support screen + 3 client methods; chatbot
+  intents complaint (USSD 13) + case status (USSD 14), en+pcm.
+- Verified: go build ./... + go test ./... all pass (12 casemgmt + 5 crm +
+  2 member-svc e2e tests); staff-portal 245KB/gzip 75KB and member-pwa
+  286KB/gzip 88KB builds clean; Dart parse-checks pass.
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the

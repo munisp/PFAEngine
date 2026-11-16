@@ -10,6 +10,9 @@ import (
 
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
+	"github.com/munisp/pfaengine/internal/casemgmt"
+	"github.com/munisp/pfaengine/internal/crm"
+	"github.com/munisp/pfaengine/internal/fraud"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
@@ -23,7 +26,8 @@ import (
 )
 
 func newTestDeps() *deps {
-	return &deps{
+	ce := casemgmt.New(nil)
+	d := &deps{
 		kyc:         kyc.NewService("test-salt", kyc.MockProvider{ProviderName: "mock-nimc"}),
 		members:     member.NewRegistry(),
 		ledger:      ledger.New(),
@@ -37,7 +41,11 @@ func newTestDeps() *deps {
 		onbPayloads: map[string]onboardPayload{},
 		micro:       map[string]*micropension.Account{},
 		stmtSecret:  []byte("test-statement-secret"),
+		cases:       ce,
+		fraud:       fraud.NewEngine(),
 	}
+	d.crm = crm.New(ce, d.memberFacts)
+	return d
 }
 
 func do(t *testing.T, h http.Handler, method, path, tenant, body string) *httptest.ResponseRecorder {

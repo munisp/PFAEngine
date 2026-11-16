@@ -103,6 +103,17 @@ class ApiClient {
 
   Future<Map<String, dynamic>> diasporaContribute(String rsaId, String currency, int amountMinor) =>
       post('/api/v1/diaspora/contributions', {'rsa_id': rsaId, 'currency': currency, 'amount_minor': amountMinor});
+
+  // ---- Tranche 20: case management (member self-service) ----
+
+  Future<Map<String, dynamic>> myCases(String memberId) =>
+      get('/api/v1/members/$memberId/cases');
+
+  Future<Map<String, dynamic>> raiseCase(String memberId, String type, String subject, String description) =>
+      post('/api/v1/members/$memberId/cases?channel=MOBILE', {'type': type, 'subject': subject, 'description': description});
+
+  Future<Map<String, dynamic>> rateCase(String caseId, int score) =>
+      post('/api/v1/cases/$caseId/csat', {'score': score});
 }
 
 class ApiException implements Exception {
