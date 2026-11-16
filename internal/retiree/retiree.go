@@ -19,6 +19,20 @@ type Retiree struct {
 	Status          string     `json:"status"` // ACTIVE | GRACE | SUSPENDED
 	LastLivenessAt  time.Time  `json:"last_liveness_at"`
 	NextLivenessDue time.Time  `json:"next_liveness_due"`
+	// FR-513 (I-Am-Alive 2026): NOK notification target and liveness
+	// evidence retention (recordings retained >= 5 years).
+	NextOfKinID           string    `json:"next_of_kin_id,omitempty"`
+	EvidenceRetainedUntil time.Time `json:"evidence_retained_until,omitempty"`
+}
+
+// EvidenceRetentionYears is the minimum liveness-evidence retention (FR-513).
+const EvidenceRetentionYears = 5
+
+// NOKNotifyDue reports whether the next-of-kin notification is due: the
+// retiree has passed the 12-month liveness due date plus the 3-month grace
+// (the suspension trigger).
+func (r Retiree) NOKNotifyDue(now time.Time) bool {
+	return now.After(r.NextLivenessDue.AddDate(0, 3, 0))
 }
 
 type PayrollRun struct {
@@ -63,6 +77,45 @@ func (r *Register) RecordLiveness(rsaID string, at time.Time) bool {
 	rt.NextLivenessDue = at.AddDate(1, 0, 0)
 	rt.Status = "ACTIVE"
 	return true
+}
+
+// SetNextOfKin records the next-of-kin notification target (FR-513).
+func (r *Register) SetNextOfKin(rsaID, nokID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rt, ok := r.retirees[rsaID]
+	if !ok {
+		return false
+	}
+	rt.NextOfKinID = nokID
+	return true
+}
+
+// RecordLivenessEvidence records a successful liveness check and retains
+// the evidence (recording) for 5 years (FR-513).
+func (r *Register) RecordLivenessEvidence(rsaID string, at time.Time) bool {
+	if !r.RecordLiveness(rsaID, at) {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rt := r.retirees[rsaID]
+	rt.EvidenceRetainedUntil = at.AddDate(EvidenceRetentionYears, 0, 0)
+	return true
+}
+
+// NOKNotifications returns the RSA IDs of suspended retirees whose
+// next-of-kin must be notified (FR-513: 12-month + 3-month grace trigger).
+func (r *Register) NOKNotifications(tenantID string, now time.Time) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, rt := range r.retirees {
+		if rt.TenantID == tenantID && rt.NextOfKinID != "" && rt.NOKNotifyDue(now) {
+			out = append(out, rt.RSAID)
+		}
+	}
+	return out
 }
 
 // Campaign advances statuses: past due+3mo grace → SUSPENDED (FR-108).

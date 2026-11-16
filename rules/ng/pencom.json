@@ -40,5 +40,41 @@
     "jurisdiction": "ANY", "kind": "sharia-pack",
     "version": "board-2026-09", "effective_from": "2026-09-01",
     "params": {"profit_share_pct": 6, "purification_mille": 18, "zakat_pct_mille": 25}
+  },
+  {
+    "uri": "rules://ng/pencom/ops-2025@v2",
+    "jurisdiction": "NG", "kind": "pencom-ops",
+    "version": "2025-v2", "effective_from": "2025-09-01",
+    "params": {
+      "funds": {
+        "I":              {"variable_income_cap_bps": 9500},
+        "II":             {"variable_income_cap_bps": 7500},
+        "III":            {"variable_income_cap_bps": 2000},
+        "IV":             {"variable_income_cap_bps": 1000},
+        "V_CONSERVATIVE": {"variable_income_cap_bps": 500},
+        "V_GROWTH":       {"variable_income_cap_bps": 3000},
+        "VI_ACTIVE":      {"variable_income_cap_bps": 5500},
+        "VI_RETIREE":     {"variable_income_cap_bps": 1000}
+      },
+      "fees": {
+        "admin_active_kobo": 10000,
+        "admin_retiree_kobo": 5000,
+        "micro_high_kobo": 8000,
+        "micro_low_kobo": 2000,
+        "micro_high_threshold_kobo": 400000,
+        "asset_based_bps": {
+          "I": 165, "II": 155, "III": 140, "IV": 100,
+          "V_CONSERVATIVE": 100, "V_GROWTH": 150,
+          "VI_ACTIVE": 155, "VI_RETIREE": 100
+        }
+      },
+      "penalty_bps_per_month": 200,
+      "remittance_working_days": 7,
+      "pencom_report_days": 14,
+      "en_bloc_min_wage_kobo": 7000000,
+      "job_loss_wait_months": 4,
+      "vc_efcc_kobo": 500000000,
+      "fcy_nfiu_cents": 1000000
+    }
   }
 ]

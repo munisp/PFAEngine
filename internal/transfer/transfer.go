@@ -48,6 +48,7 @@ type Request struct {
 	Value           money.Kobo `json:"value_kobo"`
 	State           State      `json:"state"`
 	Quarter         string     `json:"quarter"`
+	ETD             time.Time  `json:"etd,omitempty"` // Effective Transfer Date (FR-509)
 	InitiatedAt     time.Time  `json:"initiated_at"`
 	SettledAt       time.Time  `json:"settled_at,omitempty"`
 }
@@ -99,7 +100,38 @@ func (s *Service) set(id string, from []State, to State) error {
 
 func (s *Service) Validate(id string) error { return s.set(id, []State{Initiated}, Validated) }
 
-// SubmitToCycle queues into the current/next RTS quarterly window (INT-01).
+// EffectiveTransferDate computes the quarterly Effective Transfer Date
+// (FR-509, RSA Transfer Reg. Feb 2024 s.3.1): requests received in the
+// first two months of a quarter settle on that quarter's ETD
+// (31 Mar / 30 Jun / 30 Sep / 31 Dec); requests received in the third
+// month roll to the NEXT quarter's ETD.
+func EffectiveTransferDate(t time.Time) time.Time {
+	month := int(t.Month())
+	q := (month-1)/3 + 1 // current quarter, 1..4
+	year := t.Year()
+	if month%3 == 0 { // 3rd month of the quarter: roll forward
+		q++
+		if q == 5 {
+			q = 1
+			year++
+		}
+	}
+	switch q {
+	case 1:
+		return time.Date(year, 3, 31, 0, 0, 0, 0, t.Location())
+	case 2:
+		return time.Date(year, 6, 30, 0, 0, 0, 0, t.Location())
+	case 3:
+		return time.Date(year, 9, 30, 0, 0, 0, 0, t.Location())
+	default:
+		return time.Date(year, 12, 31, 0, 0, 0, 0, t.Location())
+	}
+}
+
+// SubmitToCycle queues into the RTS quarterly cycle and assigns the
+// Effective Transfer Date (FR-509). Requests received in the third month
+// of a quarter roll to the next quarter (QueuedForCycle); requests in
+// months 1–2 join the current quarter's cycle (SubmittedToRTS).
 func (s *Service) SubmitToCycle(id string, now time.Time) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -110,15 +142,14 @@ func (s *Service) SubmitToCycle(id string, now time.Time) (string, error) {
 	if r.State != Validated {
 		return "", ErrBadState
 	}
-	month := int(now.Month())
-	q := (month-1)/3 + 1
-	if month%3 == 0 {
-		r.Quarter = fmt.Sprintf("%d-Q%d", now.Year(), q)
-		r.State = SubmittedToRTS
-	} else {
-		// Queued for the next quarterly window.
-		r.Quarter = fmt.Sprintf("%d-Q%d", now.Year(), q)
+	etd := EffectiveTransferDate(now)
+	r.ETD = etd
+	r.Quarter = fmt.Sprintf("%d-Q%d", etd.Year(), (int(etd.Month())-1)/3+1)
+	if int(now.Month())%3 == 0 {
+		// Received in the 3rd month: rolls to next quarter's ETD.
 		r.State = QueuedForCycle
+	} else {
+		r.State = SubmittedToRTS
 	}
 	return r.Quarter, nil
 }
@@ -153,4 +184,22 @@ func (s *Service) Get(id string) (*Request, bool) {
 	defer s.mu.Unlock()
 	r, ok := s.requests[id]
 	return r, ok
+}
+
+// NetPositions computes the Global Net Transfer Position (GNTP, FR-509):
+// the net kobo owed per counterparty PFA across the given transfers.
+// Positive = receivable from that PFA (incoming transfers exceed outgoing);
+// negative = payable. Outgoing transfers send value to the counterparty;
+// incoming transfers receive value from them.
+func NetPositions(transfers []Request) map[string]money.Kobo {
+	net := map[string]money.Kobo{}
+	for _, t := range transfers {
+		switch t.Direction {
+		case Incoming:
+			net[t.CounterpartyPFA] += t.Value
+		case Outgoing:
+			net[t.CounterpartyPFA] -= t.Value
+		}
+	}
+	return net
 }

@@ -54,3 +54,37 @@
 ## Phase 3 items designed but not implemented here
 Analytics/lakehouse (Flink/Ray/Sedona), chatbot, open partner APIs beyond
 webhooks, ISO 27001 certification work, Flutter app, React portal.
+
+## Tranche 4 — PenCom/PRA 2014 gap analysis (docs/ADDITIONAL-REQUIREMENTS.md)
+
+FR-5xx IDs below are the *additional* scheme (Tranche 4), not the base
+spec's FR-501..503.
+
+| Req | Implementation | Status |
+|---|---|---|
+| BR-11 late-remittance penalty ≥2%/month | `internal/penalty` (Arrears.Penalty) | Implemented |
+| BR-12 14-day employer-default report | `penalty.PenComReportable` | Implemented |
+| BR-13 fee engine + micro tiers + fee holiday | `internal/fees` (RatePack, AdminFee, AccrueDaily) | Implemented |
+| BR-14 seven-fund structure (2025) | `internal/fund` (codes, DefaultFund) | Implemented |
+| BR-15 fund movement rules | `fund.ValidateMove` (free move/365d, III→I, II→III return path, Fund I age bar, micro-only V) | Implemented |
+| BR-16 variable-income caps 2025 | `rules/ng/pencom.json` funds.variable_income_cap_bps + golden test; engine enforcement in FR-510 | Implemented (rules data) |
+| BR-17 micro-pension 40/60 + contingent access | `internal/micropension` | Implemented |
+| BR-18 voluntary contributions 50/50, tax, EFCC | `internal/vc` | Implemented |
+| BR-19 benefit access rules (SRBC, en-bloc, job loss) | `internal/benefit/srbc.go` | Implemented |
+| BR-20 death benefits (Will/LoA) | — | Deferred (Tranche 5) |
+| BR-21 mortgage equity 25% | — | Deferred (Tranche 5) |
+| BR-22 Fund VII FCY USD | `internal/fcy` (Cents, 60/40, 2/yr cap, NFIU) | Implemented |
+| FR-501 penalty engine | `internal/penalty` + tests | Implemented |
+| FR-502 fee engine | `internal/fees` + tests | Implemented |
+| FR-503 fund assignment/movement | `internal/fund` + tests | Implemented |
+| FR-504 micro-pension service | `internal/micropension` + tests | Implemented |
+| FR-505 voluntary contributions | `internal/vc` + tests | Implemented |
+| FR-506 SRBC benefit computation | `benefit.LumpSumBounds/ValidateLumpSum/EnBloc` | Implemented |
+| FR-507 job-loss 25% withdrawal | `benefit.JobLossEligible` | Implemented |
+| FR-508 Fund VII FCY service | `internal/fcy` + tests | Implemented |
+| FR-509 RTS ETD correction + GNTP | `transfer.EffectiveTransferDate`, `transfer.NetPositions`, corrected `SubmitToCycle` | Implemented |
+| FR-510 investment compliance engine | — | Deferred (Tranche 5) |
+| FR-511 regulatory returns (RMAS) | — | Deferred (Tranche 5) |
+| FR-512 death-benefit workflow | — | Deferred (Tranche 5) |
+| FR-513 I-Am-Alive 2026 NOK + retention | `retiree.Retiree.NextOfKinID/EvidenceRetainedUntil`, `NOKNotifyDue`, `RecordLivenessEvidence` | Implemented |
+| Rules pack v2 (funds, fees, penalty, thresholds) | `rules/ng/pencom.json` ops-2025@v2 + `internal/rules/ops_golden_test.go` | Implemented |

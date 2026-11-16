@@ -41,3 +41,41 @@ func TestLivenessGraceAndSuspension(t *testing.T) {
 		t.Fatalf("payroll after reactivation: %+v", run)
 	}
 }
+
+// FR-513: NOK notification at suspension trigger + 5-year evidence retention.
+func TestNOKNotifyAndEvidenceRetention(t *testing.T) {
+	r := NewRegister()
+	start := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	r.Enroll("t1", "rsa-1", money.NGN(250000), "bank-1", start)
+	r.Enroll("t1", "rsa-2", money.NGN(100000), "bank-2", start)
+	if !r.SetNextOfKin("rsa-1", "nok-9") {
+		t.Fatal("set NOK failed")
+	}
+
+	// Evidence retention = verification date + 5 years.
+	if !r.RecordLivenessEvidence("rsa-1", start) {
+		t.Fatal("record evidence failed")
+	}
+	rt, _ := r.Get("rsa-1")
+	want := start.AddDate(5, 0, 0)
+	if !rt.EvidenceRetainedUntil.Equal(want) {
+		t.Fatalf("retention %s, want %s", rt.EvidenceRetainedUntil, want)
+	}
+
+	// Before the suspension trigger: no NOK notification.
+	if rt.NOKNotifyDue(start.AddDate(1, 3, 0)) {
+		t.Fatal("NOK notify must not fire before grace end")
+	}
+	// After 12mo + 3mo grace: due; only rsa-1 has a NOK recorded.
+	past := start.AddDate(1, 3, 1)
+	if !rt.NOKNotifyDue(past) {
+		t.Fatal("NOK notify must fire after grace end")
+	}
+	if _, susp := r.Campaign("t1", past); len(susp) != 2 {
+		t.Fatalf("expected both suspended, got %v", susp)
+	}
+	nok := r.NOKNotifications("t1", past)
+	if len(nok) != 1 || nok[0] != "rsa-1" {
+		t.Fatalf("NOK notifications %v", nok)
+	}
+}
