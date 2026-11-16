@@ -1,0 +1,18 @@
+name: pfaengine_member
+description: PFAEngine member app — onboarding (NIN/BVN + selfie liveness), balance, statements, transfers. One codebase, iOS + Android (§3.1).
+publish_to: "none"
+version: 0.1.0
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.10.6        # selfie-video liveness capture (camera-critical, §3.1)
+  http: ^1.2.0
+  flutter_secure_storage: ^9.2.2
+  qr_flutter: ^4.1.0     # QR-verifiable statements (FR-501)
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true

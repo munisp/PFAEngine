@@ -3,3 +3,5 @@
 *.log
 .DS_Store
 ledger-core/target/
+node_modules/
+dist/

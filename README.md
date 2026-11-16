@@ -74,13 +74,24 @@ Any rules-engine change that alters these numbers fails CI.
 | `TERMII_API_KEY` | Real SMS delivery via Termii |
 | `REMITA_*` | Employer remittance instructions via Remita |
 
-## Honest caveats (v2 scope)
+## Tranche 3: durable workflows + front ends
 
-- Flutter member app and React web portal are not in this repo yet;
-  API contracts are ready in `api/openapi.yaml`.
-- Temporal durable-worker binding wraps the transfer/benefit state
-  machines next (state machines are complete and tested).
-- Remaining Postgres repos: reporting/statement/transfer persistence.
+- `internal/workflow` + `cmd/worker`: Temporal durable workflows with
+  in-memory test-env coverage — RTS transfer (quarterly timer, 30-day SLA
+  alarm), benefit claim (docs SLA, maker-checker signal, compensation),
+  I-Am-Alive 12-month campaign with continue-as-new.
+- `apps/member_flutter`: member app (Dart) — onboarding wizard
+  (NIN→BVN→liveness→consent→RSA), dashboard with QR statement
+  verification, I-Am-Alive, per-tenant white-label theming (PLT-14).
+- `apps/staff-portal`: React+TS staff ops portal (Vite build verified) —
+  reconciliation exception queue with aging, claims maker-checker,
+  dual-control audit export, TOTP login.
+
+## Honest caveats (v3 scope)
+
+- Flutter app is source-scaffolded (Flutter SDK not available here);
+  `flutter pub get && flutter run` on any machine with the SDK.
+- Remaining Postgres repos: member/kyc/reporting/statement/transfer.
 
 See `docs/TRACEABILITY.md` for requirement-ID → code mapping and
 `docs/COMPLETION.md` for the completion score.
