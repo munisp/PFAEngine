@@ -1,0 +1,18 @@
+{
+  "welcome": "Welcome to your pension account, %s.",
+  "balance": "Your RSA balance is ₦%s.",
+  "contribution_received": "We have received your contribution of ₦%s for %s.",
+  "benefit_approved": "Your benefit request of ₦%s has been approved.",
+  "benefit_rejected": "Your benefit request was not approved. Reason: %s.",
+  "i_am_alive_reminder": "Dear %s, please confirm you are alive to keep your pension payments flowing.",
+  "i_am_alive_confirmed": "Thank you. Your liveness confirmation has been recorded.",
+  "transfer_complete": "Your RSA transfer to %s is complete.",
+  "statement_ready": "Your statement for %s is ready to download.",
+  "penalty_applied": "A penalty of ₦%s applies to the late remittance for %s.",
+  "fee_charged": "An administration fee of ₦%s has been charged to your RSA.",
+  "pin_issued": "Your RSA PIN is %s. Keep it safe.",
+  "account_suspended": "Your account has been suspended. Contact support.",
+  "document_required": "Please upload the following document: %s.",
+  "payment_received": "Payment of ₦%s received. Thank you.",
+  "error_generic": "Something went wrong. Please try again."
+}

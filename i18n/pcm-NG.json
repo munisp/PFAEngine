@@ -1,0 +1,18 @@
+{
+  "welcome": "Welcome to your pension account, %s. You don land!",
+  "balance": "The money wey dey your RSA na ₦%s.",
+  "contribution_received": "We don receive your contribution of ₦%s for %s.",
+  "benefit_approved": "Your benefit request of ₦%s don approve.",
+  "benefit_rejected": "Dem no approve your benefit request. Reason: %s.",
+  "i_am_alive_reminder": "Oga/Madam %s, abeg confirm say you dey alive so your pension go continue to drop.",
+  "i_am_alive_confirmed": "Thank you. We don record say you dey alive.",
+  "transfer_complete": "Your RSA transfer go %s don complete.",
+  "statement_ready": "Your statement for %s don ready. You fit download am now.",
+  "penalty_applied": "Penalty of ₦%s dey on top the late remittance for %s.",
+  "fee_charged": "Dem don charge administration fee of ₦%s from your RSA.",
+  "pin_issued": "Your RSA PIN na %s. Guard am well.",
+  "account_suspended": "Dem don suspend your account. Abeg contact support.",
+  "document_required": "Abeg upload this document: %s.",
+  "payment_received": "We don receive payment of ₦%s. Thank you.",
+  "error_generic": "Something no work. Abeg try again."
+}

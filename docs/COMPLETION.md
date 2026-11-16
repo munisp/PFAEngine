@@ -1,17 +1,17 @@
 # PFAEngine v1 — Completion Report
 
 Build date: 2026-11-16 · Stack: Go 1.23 (services) · Rust (ledger hot path)
-Verification: `go vet` clean, `go build` clean, **28/28 Go test packages pass**,
+Verification: `go vet` clean, `go build` clean, **32/32 Go test packages pass**,
 **4/4 Rust tests pass**, gofmt clean.
 
 ## Scores
 
 | Scope | Score | Basis |
 |---|---|---|
-| Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **95%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) implemented + tested; gaps: Postgres repository wiring, real vendor credentials, Temporal durable workers |
-| Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **95%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); USSD/agent rails and Kubecost outstanding |
-| Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **25%** | Webhook framework + AML done; capital-adequacy tracking (FR-517) added; lakehouse/chatbot designed only |
-| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **85%** | Tranches 4–5: FR-501..517 + BR-11..28 implemented (all deferred Tranche-4 items closed); REG framework complete; PLT 3/14; NFR-13..24 partial |
+| Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **97%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) + Tranche 6 Postgres repos for member/KYC/statement/report artifacts (0002 migration) implemented + tested; gaps: real vendor credentials, Temporal durable workers |
+| Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **97%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); Tranche 6: pension increases (SCM-09), annuity marketplace (SCM-11); USSD/agent rails and Kubecost outstanding |
+| Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **45%** | Webhook framework + AML done; capital-adequacy tracking (FR-517) added; Tranche 6: SaaS tenant billing engine (BR-08) + i18n bundles (REG-06); lakehouse/chatbot designed only |
+| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **90%** | Tranches 4–6: FR-501..517 + BR-08/11..28, REG-06, SCM-09/11 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial |
 
 ## What is production-shaped today
 - Money/ledger correctness: integer kobo, 8-decimal units, enforced double
@@ -97,9 +97,29 @@ Verification: `go vet` clean, `go build` clean, **28/28 Go test packages pass**,
   checks wired into registration verification.
 - FCY 48-hour return SLA (workflow.FCYReturnWorkflow, BR-22/NFR-23).
 
+## Tranche 6 delivered (2026-11-16)
+- Postgres persistence extension (internal/store/tranche6.go +
+  db/migrations/0002_tranche6.sql): member registry (hash-only NIN/BVN),
+  WORM kyc_record and statement_record (REVOKE UPDATE/DELETE, matching
+  0001 audit style), report_artifact upserts keyed by
+  (tenant, type, period); pure row validators unit-tested, DB round-trips
+  gated on TEST_DATABASE_URL.
+- Billing engine (internal/billing, BR-08): plan base + per-active-member
+  charges with free allowance (integer kobo), dunning status ladder
+  Current→Grace→Overdue→Suspended at 15/31/61 days, platform-access gate.
+- i18n (internal/i18n + i18n/*.json, REG-06): en + pcm-NG bundles (16
+  member-facing keys), LoadDir JSON loader, key-fallback T that never
+  panics.
+- Pension increases (internal/benefit/increase.go, SCM-09): bps-based
+  integer increases; policy gate requiring ≥2 consecutive surplus years,
+  MaxBps cap, zero floor.
+- Annuity marketplace (internal/annuity, SCM-11): NAICOM-licensed,
+  unexpired quote ranking (stable, payout desc); maker-checker purchase
+  state machine Requested→Approved→Instructed; premium-vs-balance
+  validation.
+
 ## Known gaps (next tranches, in priority order)
-1. Extend Postgres repos to member/kyc/reporting/statement services
+1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Lakehouse (Parquet/Delta/Spark/Sedona), chatbot, MI dashboards (BR-07/09)
-3. Billing engine (BR-08), M&A book-merge tooling (BR-10), scheme wind-up (SCM-14)
+3. M&A book-merge tooling (BR-10), scheme wind-up (SCM-14)
 4. TigerBeetle ops-maturity gate review (AC-05) — Postgres fallback active
-5. i18n (REG-06), pension increases (SCM-09), annuity marketplace (SCM-11)

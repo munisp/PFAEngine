@@ -104,11 +104,27 @@ Any rules-engine change that alters these numbers fails CI.
   registration (FR-514); `FCYReturnWorkflow` enforces the 48-hour FCY
   return SLA (BR-22/NFR-23).
 
+## Tranche 6: billing, i18n, pension increases, annuities
+
+- `internal/store` + `db/migrations/0002_tranche6.sql`: Postgres repos for
+  the member registry, WORM KYC evidence, statement metadata, and report
+  artifacts (tenant-scoped, TEST_DATABASE_URL-gated integration tests).
+- `internal/billing` (BR-08): SaaS tenant invoicing (base + per-active
+  member with free allowance) and dunning status ladder with
+  suspension gating platform access.
+- `internal/i18n` + `i18n/*.json` (REG-06): member-facing message bundles
+  (English + Nigerian Pidgin shipped; yo/ha/ig slots ready) with
+  never-panic key fallback.
+- `internal/benefit/increase.go` (SCM-09): basis-point pension increases
+  gated on sustained surplus and policy caps.
+- `internal/annuity` (SCM-11): NAICOM-licensed quote ranking and a
+  maker-checker purchase state machine (Requested→Approved→Instructed).
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);
   `flutter pub get && flutter run` on any machine with the SDK.
-- Remaining Postgres repos: member/kyc/reporting/statement/transfer.
+- Remaining Postgres repos: transfer/recon/ledger hot path.
 
 See `docs/TRACEABILITY.md` for requirement-ID → code mapping and
 `docs/COMPLETION.md` for the completion score.

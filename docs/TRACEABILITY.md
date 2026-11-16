@@ -99,3 +99,12 @@ spec's FR-501..503.
 | BR-16 engine enforcement | `investment.CheckCompliance` (caps from rules pack) | Implemented |
 | BR-22 48-hr FCY return SLA | `workflow.FCYReturnWorkflow` + `RaiseFCYSLAAlarm` | Implemented |
 | Rules pack v2 (funds, fees, penalty, thresholds) | `rules/ng/pencom.json` ops-2025@v2 + `internal/rules/ops_golden_test.go` | Implemented |
+
+## Tranche 6
+
+| Req | Implementation | Status |
+|---|---|---|
+| BR-08 SaaS tenant billing | `internal/billing` (Plan, Invoice, dunning Status.Next 15/31/61-day ladder, PlatformAccess) | Implemented |
+| REG-06 i18n (en/yo/ha/ig/pcm-NG) | `internal/i18n` (Bundle.T fallback, LoadDir) + `i18n/en.json`, `i18n/pcm-NG.json` | Implemented |
+| SCM-09 pension increases | `internal/benefit/increase.go` (ApplyIncrease bps, EligibleIncrease surplus gate + MaxBps cap) | Implemented |
+| SCM-11 annuity marketplace | `internal/annuity` (RankQuotes NAICOM/expiry filter, maker-checker Purchase, ValidatePremium) | Implemented |
