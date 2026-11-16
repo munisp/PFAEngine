@@ -10,7 +10,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,6 +25,7 @@ import (
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/money"
 	"github.com/munisp/pfaengine/internal/onboarding"
+	"github.com/munisp/pfaengine/internal/store"
 	"github.com/munisp/pfaengine/internal/tenancy"
 )
 
@@ -36,7 +39,20 @@ func main() {
 	tenants := tenancy.NewRegistry()
 	aud := audit.NewStore()
 	kycSvc := kyc.NewService(appx.Env("KYC_HASH_SALT", "dev-kyc-salt"))
-	onb := onboarding.NewStore(aud)
+	// Tranche 15b (durable persistence): when DATABASE_URL is set, TENANT
+	// and STAFF onboarding cases write through to Postgres (same
+	// onboarding.Repo as member-svc); otherwise purely in-memory.
+	var onbRepo onboarding.Repo
+	if dsn := appx.Env("DATABASE_URL", ""); dsn != "" {
+		db, err := store.Open(context.Background(), dsn)
+		if err != nil {
+			log.Fatalf("identity: DATABASE_URL set but store.Open failed: %v", err)
+		}
+		defer db.Close()
+		onbRepo = store.NewOnboardingRepo(db)
+		log.Printf("identity: DATABASE_URL set — onboarding persists to Postgres")
+	}
+	onb := onboarding.NewPersistentStore(onboarding.NewStore(aud), onbRepo)
 
 	var payloadMu sync.Mutex
 	tenantPayloads := map[string]tenancy.Tenant{} // TENANT case ID -> tenant to provision
@@ -59,10 +75,10 @@ func main() {
 				return
 			}
 			aud.Append(audit.Record{TenantID: out.ID, Actor: "platform", Action: "tenant.provisioned", EntityType: "tenant", EntityID: out.ID, After: out})
-			_ = onb.LinkRef(c.ID, out.ID)
+			_ = onb.LinkRef(context.Background(), c.TenantID, c.ID, out.ID)
 		case isStaff:
 			if err := auth.SetDisabled(sp.Email, false); err == nil {
-				_ = onb.LinkRef(c.ID, sp.Email)
+				_ = onb.LinkRef(context.Background(), c.TenantID, c.ID, sp.Email)
 			}
 		}
 	}
@@ -86,7 +102,7 @@ func main() {
 		if actor == "" {
 			actor = "platform-sales"
 		}
-		c, err := onb.Create(t.ID, onboarding.StakeholderTenant, actor, nil)
+		c, err := onb.Create(r.Context(), t.ID, onboarding.StakeholderTenant, actor, nil)
 		if err != nil {
 			appx.Err(w, 400, "ONBOARDING_FAILED", err)
 			return
@@ -131,7 +147,7 @@ func main() {
 		if actor == "" {
 			actor = in.Email
 		}
-		c, err := onb.Create(appx.TenantOf(r), onboarding.StakeholderStaff, actor, nil)
+		c, err := onb.Create(r.Context(), appx.TenantOf(r), onboarding.StakeholderStaff, actor, nil)
 		if err != nil {
 			appx.Err(w, 500, "ONBOARDING_FAILED", err)
 			return
@@ -148,7 +164,8 @@ func main() {
 	// evidence; totp_enroll enrolls the staff account in MFA (RFC 6238).
 	mux.HandleFunc("POST /v1/onboarding/{id}/steps/{step}", func(w http.ResponseWriter, r *http.Request) {
 		id, step := appx.Path(r, "id"), appx.Path(r, "step")
-		c, ok := onb.Get(id)
+		tenant := appx.TenantOf(r)
+		c, ok := onb.Get(r.Context(), tenant, id)
 		if !ok {
 			appx.Err(w, 404, "NOT_FOUND", errors.New("onboarding case not found"))
 			return
@@ -196,18 +213,18 @@ func main() {
 			}
 			respExtra = map[string]any{"totp_secret": secret}
 		}
-		if err := onb.Advance(id, step); err != nil {
+		if err := onb.Advance(r.Context(), tenant, id, step); err != nil {
 			writeOnbError(w, err)
 			return
 		}
-		c, _ = onb.Get(id)
+		c, _ = onb.Get(r.Context(), tenant, id)
 		activate(c)
-		c, _ = onb.Get(id)
+		c, _ = onb.Get(r.Context(), tenant, id)
 		appx.JSON(w, 200, map[string]any{"case": c, "extra": respExtra})
 	})
 
 	mux.HandleFunc("GET /v1/onboarding/{id}", func(w http.ResponseWriter, r *http.Request) {
-		c, ok := onb.Get(appx.Path(r, "id"))
+		c, ok := onb.Get(r.Context(), appx.TenantOf(r), appx.Path(r, "id"))
 		if !ok {
 			appx.Err(w, 404, "NOT_FOUND", errors.New("onboarding case not found"))
 			return
@@ -224,13 +241,14 @@ func main() {
 			return
 		}
 		id := appx.Path(r, "id")
-		if err := onb.Approve(id, approver); err != nil {
+		tenant := appx.TenantOf(r)
+		if err := onb.Approve(r.Context(), tenant, id, approver); err != nil {
 			writeOnbError(w, err)
 			return
 		}
-		c, _ := onb.Get(id)
+		c, _ := onb.Get(r.Context(), tenant, id)
 		activate(c)
-		c, _ = onb.Get(id)
+		c, _ = onb.Get(r.Context(), tenant, id)
 		appx.JSON(w, 200, c)
 	})
 
@@ -247,11 +265,12 @@ func main() {
 			appx.Err(w, 400, "BAD_REQUEST", err)
 			return
 		}
-		if err := onb.Reject(appx.Path(r, "id"), approver, strings.TrimSpace(in.Reason)); err != nil {
+		tenant := appx.TenantOf(r)
+		if err := onb.Reject(r.Context(), tenant, appx.Path(r, "id"), approver, strings.TrimSpace(in.Reason)); err != nil {
 			writeOnbError(w, err)
 			return
 		}
-		c, _ := onb.Get(appx.Path(r, "id"))
+		c, _ := onb.Get(r.Context(), tenant, appx.Path(r, "id"))
 		appx.JSON(w, 200, c)
 	})
 
