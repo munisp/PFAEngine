@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -43,7 +44,7 @@ func TestLocaleSetGet(t *testing.T) {
 	}
 
 	// The prefs store is the source of truth for channel services.
-	if got := d.prefs.Get(id); string(got) != "pcm-NG" {
+	if got := d.prefs.Get(context.Background(), "t1", id); string(got) != "pcm-NG" {
 		t.Fatalf("prefs.Get = %q, want pcm-NG", got)
 	}
 }
@@ -101,7 +102,7 @@ func TestOnboardLinksPhone(t *testing.T) {
 		t.Fatal(err)
 	}
 	// WhatsApp senders arrive as bare digits.
-	if got, ok := d.prefs.MemberForPhone("2348030000000"); !ok || got != created.MemberID {
+	if got, ok := d.prefs.MemberForPhone(context.Background(), "t1", "2348030000000"); !ok || got != created.MemberID {
 		t.Fatalf("MemberForPhone = %q, %v; want %q", got, ok, created.MemberID)
 	}
 }

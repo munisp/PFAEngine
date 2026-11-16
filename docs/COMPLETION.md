@@ -272,6 +272,28 @@ enrollment, login disabled until approval via authn.SetDisabled).
 `scripts/e2e-onboarding.sh` drives member, employer and staff lifecycles
 against the built binaries — PASS.
 
+## Tranche 14 delivered — durable persistence for onboarding + preferences
+
+Persistence coverage now includes the unified onboarding framework and
+member preferences. `db/migrations/0003_onboarding.sql` adds
+`onboarding_case` / `onboarding_step` (updatable status machine),
+`onboarding_document` (WORM: REVOKE + a BEFORE UPDATE/DELETE trigger so
+the table owner is bound too) and `member_prefs` (per-tenant PK, phone
+lookup index). `internal/store` gains `OnboardingRepo` (one
+`WithTenant` transaction per save: case upsert + step upserts + new
+documents) and `PrefsRepo` (locale upsert, E.164-normalised phone binding
+via `prefs.NormalizePhone`, phone→member→locale resolution).
+`internal/onboarding` and `internal/prefs` gain `PersistentStore`
+write-through wrappers over the unchanged in-memory stores: repo errors
+fail the mutation (memory rolled back), reads prefer the repo with memory
+degradation on transient errors, nil repo = previous in-memory behaviour.
+member-svc switches to Postgres write-through when `DATABASE_URL` is set.
+Unit suites cover write-through, rollback, fallback, load-through and ID
+collision retry; `TEST_DATABASE_URL`-gated integration tests cover the
+full EMPLOYER lifecycle round-trip, WORM UPDATE/DELETE rejection, prefs
+round-trip with phone normalisation, and tenant isolation — idempotent
+across reruns (unique run suffixes).
+
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
 2. Production lakehouse infra (Parquet/Delta/Spark) fed by the

@@ -306,6 +306,38 @@ Any rules-engine change that alters these numbers fails CI.
   COMPLIANT), staff (pre-approval login blocked, TOTP enroll → approve →
   TOTP login works).
 
+## Tranche 14: durable persistence for onboarding + preferences
+
+- `db/migrations/0003_onboarding.sql` (additive) — `onboarding_case` +
+  `onboarding_step` (updatable: the status machine mutates them),
+  `onboarding_document` (WORM: REVOKE UPDATE/DELETE plus a BEFORE
+  UPDATE/DELETE trigger so even the table owner cannot mutate evidence),
+  `member_prefs` (PK (tenant_id, member_id); phone lookup index on
+  (tenant_id, phone_e164)). Index on (tenant_id, stakeholder, status) for
+  case listing.
+- `internal/store/onboarding_repo.go` — `OnboardingRepo` (Save upserts
+  case + steps + new documents in one `WithTenant` transaction; Load
+  rebuilds pipeline step order from the stakeholder template; List filters
+  by stakeholder/status) and `PrefsRepo` (Set/Get locale, LinkPhone with
+  `prefs.NormalizePhone` E.164 normalisation, MemberForPhone,
+  LocaleForPhone). Both implement the new `onboarding.Repo` / `prefs.Repo`
+  interfaces — the domain packages never import `store`.
+- `internal/onboarding` + `internal/prefs` — `PersistentStore`
+  write-through wrappers: every mutation applies the in-memory state
+  machine (audit appends intact) and persists; a repo error fails the
+  mutation and rolls memory back. Reads prefer the repo and degrade to
+  memory on transient errors; a nil repo is pure in-memory (backward
+  compatible). Repo-loaded cases hydrate memory so the state machine can
+  mutate them after a restart, and Create skips IDs already persisted by
+  earlier process lifetimes.
+- `cmd/member-svc` — when `DATABASE_URL` is set, the onboarding store and
+  prefs store are Postgres write-through; otherwise in-memory (unchanged).
+- Tests: unit write-through/rollback/fallback/load-through suites with
+  fake repos; `TEST_DATABASE_URL`-gated integration round-trips (full
+  EMPLOYER lifecycle create → steps → approve → reload, WORM UPDATE/DELETE
+  rejection, prefs locale + normalised phone round-trip, tenant
+  isolation), idempotent across reruns via unique run suffixes.
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);

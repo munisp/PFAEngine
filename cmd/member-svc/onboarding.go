@@ -6,9 +6,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -75,9 +77,13 @@ func (d *deps) createOnboardingCase(w http.ResponseWriter, r *http.Request) {
 	if submittedBy == "" {
 		submittedBy = "member-self"
 	}
-	c, err := d.onb.Create(httpsrv.TenantOf(r), sh, submittedBy, nil)
+	c, err := d.onb.Create(r.Context(), httpsrv.TenantOf(r), sh, submittedBy, nil)
 	if err != nil {
-		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
+		status := http.StatusInternalServerError
+		if errors.Is(err, onboarding.ErrUnknownStakeholder) {
+			status = http.StatusBadRequest
+		}
+		httpsrv.WriteError(w, status, "CREATE_FAILED", err)
 		return
 	}
 	d.onbMu.Lock()
@@ -88,7 +94,7 @@ func (d *deps) createOnboardingCase(w http.ResponseWriter, r *http.Request) {
 
 // getOnboardingCase handles GET /api/v1/onboarding/{id}.
 func (d *deps) getOnboardingCase(w http.ResponseWriter, r *http.Request) {
-	c, ok := d.onb.Get(r.PathValue("id"))
+	c, ok := d.onb.Get(r.Context(), httpsrv.TenantOf(r), r.PathValue("id"))
 	if !ok {
 		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("onboarding case not found"))
 		return
@@ -103,7 +109,9 @@ func (d *deps) getOnboardingCase(w http.ResponseWriter, r *http.Request) {
 // hook provisions the linked entity.
 func (d *deps) completeOnboardingStep(w http.ResponseWriter, r *http.Request) {
 	id, step := r.PathValue("id"), r.PathValue("step")
-	c, ok := d.onb.Get(id)
+	tenant := httpsrv.TenantOf(r)
+	ctx := r.Context()
+	c, ok := d.onb.Get(ctx, tenant, id)
 	if !ok {
 		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("onboarding case not found"))
 		return
@@ -126,20 +134,19 @@ func (d *deps) completeOnboardingStep(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	tenant := httpsrv.TenantOf(r)
 	payload := d.payload(id)
 	if c.Stakeholder == onboarding.StakeholderMember {
 		if !d.runKYCStep(w, tenant, c.ID, step, payload, body.SelfieRef, body.Consent) {
 			return
 		}
 	}
-	if err := d.onb.Advance(id, step); err != nil {
+	if err := d.onb.Advance(ctx, tenant, id, step); err != nil {
 		writeOnboardingError(w, err)
 		return
 	}
-	c, _ = d.onb.Get(id)
-	d.maybeActivate(tenant, c)
-	c, _ = d.onb.Get(id)
+	c, _ = d.onb.Get(ctx, tenant, id)
+	d.maybeActivate(ctx, tenant, c)
+	c, _ = d.onb.Get(ctx, tenant, id)
 	httpsrv.WriteJSON(w, http.StatusOK, c)
 }
 
@@ -201,13 +208,15 @@ func (d *deps) approveOnboarding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if err := d.onb.Approve(id, approver); err != nil {
+	tenant := httpsrv.TenantOf(r)
+	ctx := r.Context()
+	if err := d.onb.Approve(ctx, tenant, id, approver); err != nil {
 		writeOnboardingError(w, err)
 		return
 	}
-	c, _ := d.onb.Get(id)
-	d.maybeActivate(httpsrv.TenantOf(r), c)
-	c, _ = d.onb.Get(id)
+	c, _ := d.onb.Get(ctx, tenant, id)
+	d.maybeActivate(ctx, tenant, c)
+	c, _ = d.onb.Get(ctx, tenant, id)
 	httpsrv.WriteJSON(w, http.StatusOK, c)
 }
 
@@ -227,25 +236,27 @@ func (d *deps) rejectOnboarding(w http.ResponseWriter, r *http.Request) {
 		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
 		return
 	}
-	if err := d.onb.Reject(r.PathValue("id"), approver, strings.TrimSpace(in.Reason)); err != nil {
+	id := r.PathValue("id")
+	tenant := httpsrv.TenantOf(r)
+	if err := d.onb.Reject(r.Context(), tenant, id, approver, strings.TrimSpace(in.Reason)); err != nil {
 		writeOnboardingError(w, err)
 		return
 	}
-	c, _ := d.onb.Get(r.PathValue("id"))
+	c, _ := d.onb.Get(r.Context(), tenant, id)
 	httpsrv.WriteJSON(w, http.StatusOK, c)
 }
 
 // maybeActivate runs the activation hook exactly once: when the case
 // reaches ACTIVE and no entity is linked yet, it provisions the linked
 // entity and binds it via LinkRef.
-func (d *deps) maybeActivate(tenant string, c *onboarding.Case) {
+func (d *deps) maybeActivate(ctx context.Context, tenant string, c *onboarding.Case) {
 	if c.Status != onboarding.StatusActive || c.RefID != "" {
 		return
 	}
 	payload := d.payload(c.ID)
-	refID := d.activate(tenant, c, payload)
+	refID := d.activate(ctx, tenant, c, payload)
 	if refID != "" {
-		_ = d.onb.LinkRef(c.ID, refID)
+		_ = d.onb.LinkRef(ctx, tenant, c.ID, refID)
 	}
 }
 
@@ -253,11 +264,13 @@ func (d *deps) maybeActivate(tenant string, c *onboarding.Case) {
 // its ID. MEMBER reuses the create-member internals (registry + ledger
 // accounts); MICRO_MEMBER additionally opens the micro-pension account;
 // RETIREE registers in the retiree register (FR-403).
-func (d *deps) activate(tenant string, c *onboarding.Case, p onboardPayload) string {
+func (d *deps) activate(ctx context.Context, tenant string, c *onboarding.Case, p onboardPayload) string {
 	switch c.Stakeholder {
 	case onboarding.StakeholderMember:
 		person := d.members.CreatePerson(tenant, p.FullName, p.DOB, p.Phone, p.Email)
-		d.prefs.LinkPhone(p.Phone, person.ID)
+		if err := d.prefs.LinkPhone(ctx, tenant, p.Phone, person.ID); err != nil {
+			log.Printf("member-svc: prefs phone link for %s: %v", person.ID, err)
+		}
 		d.openMemberAccounts(tenant, person.ID)
 		d.audit.Append(audit.Record{TenantID: tenant, Actor: "member-svc", Action: "member.onboarded",
 			EntityType: "person", EntityID: person.ID,
@@ -265,7 +278,9 @@ func (d *deps) activate(tenant string, c *onboarding.Case, p onboardPayload) str
 		return person.ID
 	case onboarding.StakeholderMicroMember:
 		person := d.members.CreatePerson(tenant, p.FullName, p.DOB, p.Phone, p.Email)
-		d.prefs.LinkPhone(p.Phone, person.ID)
+		if err := d.prefs.LinkPhone(ctx, tenant, p.Phone, person.ID); err != nil {
+			log.Printf("member-svc: prefs phone link for %s: %v", person.ID, err)
+		}
 		d.microMu.Lock()
 		d.micro[person.ID] = &micropension.Account{}
 		d.microMu.Unlock()
@@ -299,6 +314,8 @@ func (d *deps) payload(caseID string) onboardPayload {
 }
 
 // writeOnboardingError maps onboarding domain errors onto HTTP statuses.
+// Domain conflicts enumerate explicitly; anything else (e.g. a persistence
+// failure from the Tranche 14 write-through repo) is a 500.
 func writeOnboardingError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, onboarding.ErrCaseNotFound):
@@ -311,7 +328,11 @@ func writeOnboardingError(w http.ResponseWriter, err error) {
 		httpsrv.WriteError(w, http.StatusBadRequest, "REASON_REQUIRED", err)
 	case errors.Is(err, onboarding.ErrUnknownStep):
 		httpsrv.WriteError(w, http.StatusBadRequest, "UNKNOWN_STEP", err)
-	default: // order/done/not-required/not-approvable/closed conflicts
+	case errors.Is(err, onboarding.ErrStepNotRequired), errors.Is(err, onboarding.ErrStepDone),
+		errors.Is(err, onboarding.ErrStepOrder), errors.Is(err, onboarding.ErrCaseClosed),
+		errors.Is(err, onboarding.ErrNotApprovable):
 		httpsrv.WriteError(w, http.StatusConflict, "STEP_CONFLICT", err)
+	default: // persistence or other infrastructure failure
+		httpsrv.WriteError(w, http.StatusInternalServerError, "ONBOARDING_FAILED", err)
 	}
 }

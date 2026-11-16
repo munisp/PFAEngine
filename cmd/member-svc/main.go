@@ -8,6 +8,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,7 @@ import (
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/retiree"
 	"github.com/munisp/pfaengine/internal/statement"
+	"github.com/munisp/pfaengine/internal/store"
 )
 
 // deps bundles the domain stores the handlers operate on.
@@ -45,13 +47,13 @@ type deps struct {
 	audit    *audit.Store
 	authn    *authn.Service
 	retirees *retiree.Register
-	prefs    *prefs.Store
+	prefs    *prefs.PersistentStore
 	alive    *aliveTracker
 	// onb is the unified onboarding case store (FR-520); onbPayloads holds
 	// the per-case submission payloads the step handlers and activation
 	// hooks need, and micro holds the micro-pension accounts opened for
 	// MICRO_MEMBER cases.
-	onb         *onboarding.Store
+	onb         *onboarding.PersistentStore
 	onbMu       sync.Mutex
 	onbPayloads map[string]onboardPayload
 	microMu     sync.Mutex
@@ -63,6 +65,23 @@ type deps struct {
 func main() {
 	salt := httpsrv.Getenv("KYC_HASH_SALT", "dev-salt-change-me")
 	aud := audit.NewStore()
+	// Tranche 14 (durable persistence): when DATABASE_URL is set,
+	// onboarding cases and member preferences write through to Postgres
+	// (internal/store repos behind the onboarding.Repo / prefs.Repo
+	// interfaces); otherwise both stores run purely in-memory (previous
+	// behaviour).
+	var onbRepo onboarding.Repo
+	var prefsRepo prefs.Repo
+	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
+		db, err := store.Open(context.Background(), dsn)
+		if err != nil {
+			log.Fatalf("member-svc: DATABASE_URL set but store.Open failed: %v", err)
+		}
+		defer db.Close()
+		onbRepo = store.NewOnboardingRepo(db)
+		prefsRepo = store.NewPrefsRepo(db)
+		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs persist to Postgres")
+	}
 	d := &deps{
 		kyc: kyc.NewService(salt,
 			kyc.MockProvider{ProviderName: "mock-nimc"},
@@ -73,9 +92,9 @@ func main() {
 		audit:       aud,
 		authn:       authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
 		retirees:    retiree.NewRegister(),
-		prefs:       prefs.NewStore(),
+		prefs:       prefs.NewPersistentStore(prefs.NewStore(), prefsRepo),
 		alive:       newAliveTracker(),
-		onb:         onboarding.NewStore(aud),
+		onb:         onboarding.NewPersistentStore(onboarding.NewStore(aud), onbRepo),
 		onbPayloads: map[string]onboardPayload{},
 		micro:       map[string]*micropension.Account{},
 		stmtSecret:  []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
@@ -166,8 +185,12 @@ func (d *deps) createMember(w http.ResponseWriter, r *http.Request) {
 	p := d.members.CreatePerson(tenant, in.FullName, in.DOB, in.Phone, in.Email)
 	// Bind the member's phone so channel services (e.g. the WhatsApp
 	// webhook) can resolve the sender to this member and their locale.
-	// NOTE: prefs.Store is in-memory per process — see internal/prefs.
-	d.prefs.LinkPhone(in.Phone, p.ID)
+	// Write-through to Postgres when DATABASE_URL is set (Tranche 14); a
+	// persistence failure is logged but does not fail onboarding — the
+	// in-memory binding still serves this process.
+	if err := d.prefs.LinkPhone(r.Context(), tenant, in.Phone, p.ID); err != nil {
+		log.Printf("member-svc: prefs phone link for %s: %v", p.ID, err)
+	}
 
 	ninRec, dupOf, err := d.kyc.VerifyNIN(tenant, p.ID, in.NIN, in.FullName, in.DOB)
 	if err != nil {
@@ -389,7 +412,10 @@ func (d *deps) setLocale(w http.ResponseWriter, r *http.Request) {
 			errors.New("locale must be one of en, yo, ha, ig, pcm-NG"))
 		return
 	}
-	d.prefs.Set(id, loc)
+	if err := d.prefs.Set(r.Context(), httpsrv.TenantOf(r), id, loc); err != nil {
+		httpsrv.WriteError(w, http.StatusInternalServerError, "PREFS_FAILED", err)
+		return
+	}
 	d.audit.Append(audit.Record{TenantID: httpsrv.TenantOf(r), Actor: "member-svc", Action: "member.locale.set",
 		EntityType: "person", EntityID: id, After: map[string]any{"locale": string(loc)}})
 	httpsrv.WriteJSON(w, http.StatusOK, map[string]any{"member_id": id, "locale": string(loc)})
@@ -402,7 +428,7 @@ func (d *deps) getLocale(w http.ResponseWriter, r *http.Request) {
 		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("member not found"))
 		return
 	}
-	httpsrv.WriteJSON(w, http.StatusOK, map[string]any{"member_id": id, "locale": string(d.prefs.Get(id))})
+	httpsrv.WriteJSON(w, http.StatusOK, map[string]any{"member_id": id, "locale": string(d.prefs.Get(r.Context(), httpsrv.TenantOf(r), id))})
 }
 
 // balance returns the member's RSA balance from the ledger (integer kobo).
