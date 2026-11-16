@@ -11,7 +11,7 @@ Verification: `go vet` clean, `go build` clean, **40/40 Go test packages pass**,
 | Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **97%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) + Tranche 6 Postgres repos for member/KYC/statement/report artifacts (0002 migration) implemented + tested; gaps: real vendor credentials, Temporal durable workers |
 | Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **97%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); Tranche 6: pension increases (SCM-09), annuity marketplace (SCM-11); USSD/agent rails and Kubecost outstanding |
 | Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **70%** | Webhook framework + AML done; capital-adequacy tracking (FR-517); Tranche 6: SaaS tenant billing engine (BR-08) + i18n bundles (REG-06); Tranche 7: lakehouse staging sink + MI dashboards (BR-07/09), deterministic member chatbot with USSD parity (BR-09); remaining: ML models, production lakehouse infra |
-| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **97%** | Tranches 4–8: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; Tranche 8 production hardening shipped (shared HTTP layer, gateway routing/readiness, hardened Dockerfile, CI, smoke harness); remaining gaps are vendor credentials and infrastructure rollout |
+| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **98%** | Tranches 4–9: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; Tranche 8 production hardening shipped (shared HTTP layer, gateway routing/readiness, hardened Dockerfile, CI, smoke harness); Tranche 9 shipped perf benchmarks, vendor conformance harness, deploy validation, and the gated Kafka integration test; remaining gaps are vendor credentials and infrastructure rollout |
 
 ## What is production-shaped today
 - Money/ledger correctness: integer kobo, 8-decimal units, enforced double
@@ -173,6 +173,33 @@ Verification: `go vet` clean, `go build` clean, **40/40 Go test packages pass**,
   checks probes, tenant enforcement, onboarding, CSV upload, exact
   integer-kobo balance, recon exceptions, and SIGTERM drain; prints
   PASS/FAIL — currently PASS.
+
+## Tranche 9 delivered (2026-11-16) — performance, vendor conformance, deploy validation
+- Hot-path benchmarks: internal/ledger/bench_test.go (BenchmarkPost /
+  BenchmarkBalance / BenchmarkTrialBalance / BenchmarkReplay on a
+  1,000-entry ledger), internal/recon/bench_test.go (BenchmarkReconcile10K:
+  10k schedule lines vs 10k receipts, in-benchmark assertion of the BR-03
+  ≥95% auto-match floor), internal/contribution/bench_test.go
+  (BenchmarkParseCSV10K). Results recorded in docs/BENCHMARKS.md
+  (post ≈1.1µs; replay ≈9µs/1k entries; recon 10k×10k ≈7ms; CSV 10k ≈3.2ms).
+- Vendor conformance harness (internal/vendors/conformance_test.go):
+  reusable ConformanceCase/RunConformance contract suite over httptest
+  servers; credentials recomputed server-side (Smile ID HMAC-SHA256 of
+  timestamp+partnerID+"sid_request", Remita SHA-512 hash-key ordering via
+  a new CheckStatus wire call, Termii api_key payload, Dojah
+  Authorization/AppId headers, Africa's Talking apiKey header +
+  form-encoded body via a new SendSMS wire call).
+- Deploy validation (scripts/validate-deploy.sh): POSIX sh + python3
+  (PyYAML, with grep fallback); enforces k8s probes / non-root
+  securityContext / resource requests+limits / pinned image tags, and
+  compose healthcheck+depends_on on every app service plus presence of
+  all 15 README microservices. Manifests fixed to comply: k8s base image
+  pinned to v1.0.0 with a non-root securityContext; compose app services
+  carry /healthz healthchecks and minio is pinned. Currently PASS.
+- Kafka integration test (internal/stream/kafka_integration_test.go),
+  gated on TEST_KAFKA_BROKERS: 100 keyed envelopes through the production
+  Publisher (Hash balancer, RequireAll), asserting per-key ordering and
+  payload integrity on consume. Skips cleanly without a broker.
 
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services

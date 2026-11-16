@@ -1,17 +1,70 @@
 package vendors
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
+	"time"
 )
 
-// AfricasTalking implements the USSD session handler (INT-08):
-// aggregator callbacks map to member-service API operations.
+// AfricasTalking implements the USSD session handler (INT-08) and the SMS
+// sender: aggregator callbacks map to member-service API operations.
 // Session protocol: text is the "*" - joined input chain.
 type AfricasTalking struct {
 	APIKey    string
 	Username  string
 	ShortCode string
+	BaseURL   string // https://api.africastalking.com (sandbox: api.sandbox.africastalking.com)
+	HTTP      *http.Client
+}
+
+// SendSMS posts a message to the Africa's Talking messaging endpoint:
+// application/x-www-form-urlencoded username/to/message body with the
+// apiKey header credential (aggregator auth scheme).
+func (at *AfricasTalking) SendSMS(ctx context.Context, to, message string) (string, error) {
+	hc := at.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 15 * time.Second}
+	}
+	form := url.Values{}
+	form.Set("username", at.Username)
+	form.Set("to", to)
+	form.Set("message", message)
+	req, err := http.NewRequestWithContext(ctx, "POST", at.BaseURL+"/version1/messaging", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("apiKey", at.APIKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := hc.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("africastalking: %s: %s", resp.Status, string(raw))
+	}
+	var out struct {
+		SMSMessageData struct {
+			Recipients []struct {
+				MessageID string `json:"messageId"`
+				Status    string `json:"status"`
+			} `json:"Recipients"`
+		} `json:"SMSMessageData"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", fmt.Errorf("africastalking: bad response: %w", err)
+	}
+	if len(out.SMSMessageData.Recipients) == 0 {
+		return "", fmt.Errorf("africastalking: no recipients in response: %s", string(raw))
+	}
+	return out.SMSMessageData.Recipients[0].MessageID, nil
 }
 
 // USSDResponse: CON (continue) or END (terminate) per aggregator protocol.

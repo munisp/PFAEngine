@@ -81,19 +81,7 @@ func TestClaimWorkflowReject(t *testing.T) {
 
 // registerAll registers every activity the workflows invoke.
 func registerAll(env *testsuite.TestWorkflowEnvironment) {
-	a := Activities{}
-	for name, fn := range map[string]any{
-		"ValidateTransfer": a.ValidateTransfer, "AwaitRTSWindow": a.AwaitRTSWindow,
-		"SubmitToRTS": a.SubmitToRTS, "RaiseSLAAlarm": a.RaiseSLAAlarm,
-		"SettleTransferValue": a.SettleTransferValue, "NotifyMember": a.NotifyMember,
-		"EscalateClaim": a.EscalateClaim, "InstructCustodianPayment": a.InstructCustodianPayment,
-		"CompensateClaimApproval": a.CompensateClaimApproval,
-		"SendLivenessReminder":    a.SendLivenessReminder, "SuspendRetiree": a.SuspendRetiree,
-		"ReinstateRetiree":   a.ReinstateRetiree,
-		"EscalateDeathClaim": a.EscalateDeathClaim, "PayDeathBenefit": a.PayDeathBenefit,
-		"NotifyNOK": a.NotifyNOK, "InitiateFCYReturn": a.InitiateFCYReturn,
-		"RaiseFCYSLAAlarm": a.RaiseFCYSLAAlarm,
-	} {
+	for name, fn := range ActivityRegistry(Activities{}) {
 		env.RegisterActivityWithOptions(fn, activity.RegisterOptions{Name: name})
 	}
 }

@@ -33,6 +33,7 @@
 | NFR-11 no cloud-proprietary core | OSS stack only (compose) | Done |
 | NFR-19 rules externalization | `internal/rules`, `rules/` packs | Done |
 | NFR-21 golden tests | `internal/rules/golden_test.go` | Done |
+| NFR perf benchmarks (ledger post/balance/replay, recon 10k, CSV 10k) | `internal/ledger/bench_test.go`, `internal/recon/bench_test.go`, `internal/contribution/bench_test.go`, results in `docs/BENCHMARKS.md` | Implemented |
 | REG-01 adapter framework | `internal/regx` (NG/GH/KE/ZA/EG + generic) | Done |
 | REG-02 multi-currency + FX split | `internal/regx/fx.go` | Done |
 | REG-07 tax engine EET/TEE/ETT | `internal/regx/tax.go` | Done |

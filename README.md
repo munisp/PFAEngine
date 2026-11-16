@@ -177,6 +177,29 @@ Any rules-engine change that alters these numbers fails CI.
 - `.github/workflows/ci.yml`: Go 1.23 build/vet/test + gofmt gate, Rust
   `cargo test` for ledger-core, Dockerfile static checks.
 
+## Tranche 9: performance, vendor conformance, deploy validation
+
+- Hot-path benchmarks with recorded numbers in
+  [docs/BENCHMARKS.md](docs/BENCHMARKS.md): ledger post/balance/
+  trial-balance/replay (`internal/ledger/bench_test.go`), 10k×10k
+  reconciliation at the BR-03 ≥95% auto-match floor
+  (`internal/recon/bench_test.go`), and 10k-row CSV schedule ingestion
+  (`internal/contribution/bench_test.go`). Run:
+  `go test -bench=. -benchtime=1x ./internal/ledger/... ./internal/recon/... ./internal/contribution/...`
+- Vendor conformance suite (`internal/vendors/conformance_test.go`):
+  reusable `ConformanceCase`/`RunConformance` harness over httptest
+  servers; every adapter's auth/signature scheme is recomputed
+  server-side (Smile ID HMAC-SHA256, Remita SHA-512 hash-key ordering,
+  Termii `api_key`, Dojah `Authorization`, Africa's Talking `apiKey` +
+  form encoding).
+- Deploy validation (`sh scripts/validate-deploy.sh`): enforces k8s
+  probes, non-root securityContext, resource requests/limits, pinned
+  image tags, and compose healthcheck/depends_on for every app service
+  plus all 15 microservices present — currently PASS.
+- Kafka integration test (`internal/stream/kafka_integration_test.go`)
+  gated on `TEST_KAFKA_BROKERS`: 100 keyed messages round-tripped with
+  per-key hash-partition ordering and payload integrity asserted.
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);
