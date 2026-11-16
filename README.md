@@ -120,6 +120,26 @@ Any rules-engine change that alters these numbers fails CI.
 - `internal/annuity` (SCM-11): NAICOM-licensed quote ranking and a
   maker-checker purchase state machine (Requested→Approved→Instructed).
 
+## Tranche 7: lakehouse/MI, chatbot, M&A merge, wind-up, TB gate
+
+- `internal/lakehouse` (BR-07/BR-09): analytics event sink (thread-safe
+  `MemorySink`, JSONL `ParquetLine` staging for parquet export) and pure
+  MI aggregations — contributions-by-month, employer delinquency, cohort
+  retention, and `BuildDashboard` with tenant filtering.
+- `internal/chatbot` (BR-09): deterministic, no-LLM intent classifier
+  (longest-keyword-first, English + Nigerian Pidgin keywords) with
+  localized canned replies via `internal/i18n` and USSD menu parity.
+- `internal/merger` (BR-10): M&A roster re-tenanting with PIN-conflict
+  detection, ordered `PlanMerge` steps through PenCom approval, and a
+  per-member + total `BalanceProof`.
+- `internal/windup` (SCM-14): strict forward-only wind-up lifecycle,
+  statutory distribution order, and integer pro-rata residual allocation
+  (remainder to the largest balance; sums exactly).
+- `internal/tbgate` (AC-05): TigerBeetle ops-maturity gate — adoption
+  requires all six capabilities (3-node replication, failover drill,
+  backup-restore drill, 72h soak test, dual-control export, ledger
+  replay parity) with evidence; Postgres stays the default ledger.
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);

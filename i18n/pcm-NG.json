@@ -14,5 +14,11 @@
   "account_suspended": "Dem don suspend your account. Abeg contact support.",
   "document_required": "Abeg upload this document: %s.",
   "payment_received": "We don receive payment of ₦%s. Thank you.",
-  "error_generic": "Something no work. Abeg try again."
+  "error_generic": "Something no work. Abeg try again.",
+  "chat.balance": "Your RSA balance dey your latest statement. Dial *789# press 1 to hear am.",
+  "chat.last_contribution": "Your last contribution dey your statement. Dial *789# press 2.",
+  "chat.statement": "Your statement don ready for the app or email. Dial *789# press 3.",
+  "chat.i_am_alive": "To confirm say you dey alive, open the app do liveness check, or dial *789# press 4.",
+  "chat.transfer_status": "RSA transfer dey complete within 365 days of your request. Dial *789# press 5 for status.",
+  "chat.unknown": "Sorry, I no understand. Try: balance, contribution, statement, alive, or transfer."
 }

@@ -14,5 +14,11 @@
   "account_suspended": "Your account has been suspended. Contact support.",
   "document_required": "Please upload the following document: %s.",
   "payment_received": "Payment of ₦%s received. Thank you.",
-  "error_generic": "Something went wrong. Please try again."
+  "error_generic": "Something went wrong. Please try again.",
+  "chat.balance": "Your RSA balance is on your latest statement. Dial *789# and press 1 to hear it.",
+  "chat.last_contribution": "Your last contribution details are on your statement. Dial *789# and press 2.",
+  "chat.statement": "Your statement is ready in the app or via email. Dial *789# and press 3.",
+  "chat.i_am_alive": "To confirm you are alive, open the app and complete the liveness check, or dial *789# and press 4.",
+  "chat.transfer_status": "RSA transfers complete within 365 days of your request. Dial *789# and press 5 for status.",
+  "chat.unknown": "Sorry, I did not understand. Try: balance, contribution, statement, alive, or transfer."
 }

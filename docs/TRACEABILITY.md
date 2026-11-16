@@ -49,10 +49,19 @@
 | INT-01 PenCom RTS/PCRS adapter | `regx.NigeriaAdapter` + `transfer` | Done |
 | INT-02..04 aggregator facade + failover | `kyc.Service` (2 providers, queue) | Done |
 | INT-09 signed webhooks | `internal/webhk` (HMAC-SHA256) | Done |
-| AC-05 TigerBeetle gate | Postgres ledger default; TB gate checklist pending | Pending |
+| AC-05 TigerBeetle gate | `internal/tbgate` (RequiredCapabilities, Assess, LedgerParity); Postgres ledger remains default until all 6 capabilities pass with evidence | Implemented |
+
+## Tranche 7
+
+| Req | Implementation | Status |
+|---|---|---|
+| BR-07 lakehouse analytics | `internal/lakehouse` (Event, Sink, MemorySink, ParquetLine JSONL staging) | Implemented |
+| BR-09 MI dashboards + member chatbot | `internal/lakehouse` (ContributionsByMonth, EmployerDelinquency, CohortRetention, BuildDashboard); `internal/chatbot` (Classify, Responder, USSDCode) | Implemented |
+| BR-10 M&A book merge | `internal/merger` (MergeRoster + ErrPINConflict, PlanMerge, BalanceProof) | Implemented |
+| SCM-14 scheme wind-up | `internal/windup` (Advance state machine, DistributionOrder, ProRata exact-sum) | Implemented |
 
 ## Phase 3 items designed but not implemented here
-Analytics/lakehouse (Flink/Ray/Sedona), chatbot, open partner APIs beyond
+ML models on top of the lakehouse, open partner APIs beyond
 webhooks, ISO 27001 certification work, Flutter app, React portal.
 
 ## Tranches 4–5 — PenCom/PRA 2014 gap analysis (docs/ADDITIONAL-REQUIREMENTS.md)

@@ -1,7 +1,7 @@
 # PFAEngine v1 — Completion Report
 
 Build date: 2026-11-16 · Stack: Go 1.23 (services) · Rust (ledger hot path)
-Verification: `go vet` clean, `go build` clean, **32/32 Go test packages pass**,
+Verification: `go vet` clean, `go build` clean, **37/37 Go test packages pass**,
 **4/4 Rust tests pass**, gofmt clean.
 
 ## Scores
@@ -10,8 +10,8 @@ Verification: `go vet` clean, `go build` clean, **32/32 Go test packages pass**,
 |---|---|---|
 | Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **97%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) + Tranche 6 Postgres repos for member/KYC/statement/report artifacts (0002 migration) implemented + tested; gaps: real vendor credentials, Temporal durable workers |
 | Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **97%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); Tranche 6: pension increases (SCM-09), annuity marketplace (SCM-11); USSD/agent rails and Kubecost outstanding |
-| Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **45%** | Webhook framework + AML done; capital-adequacy tracking (FR-517) added; Tranche 6: SaaS tenant billing engine (BR-08) + i18n bundles (REG-06); lakehouse/chatbot designed only |
-| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **90%** | Tranches 4–6: FR-501..517 + BR-08/11..28, REG-06, SCM-09/11 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial |
+| Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **70%** | Webhook framework + AML done; capital-adequacy tracking (FR-517); Tranche 6: SaaS tenant billing engine (BR-08) + i18n bundles (REG-06); Tranche 7: lakehouse staging sink + MI dashboards (BR-07/09), deterministic member chatbot with USSD parity (BR-09); remaining: ML models, production lakehouse infra |
+| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **95%** | Tranches 4–7: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; remaining gaps are production hardening only |
 
 ## What is production-shaped today
 - Money/ledger correctness: integer kobo, 8-decimal units, enforced double
@@ -118,8 +118,35 @@ Verification: `go vet` clean, `go build` clean, **32/32 Go test packages pass**,
   state machine Requested→Approved→Instructed; premium-vs-balance
   validation.
 
-## Known gaps (next tranches, in priority order)
+## Tranche 7 delivered (2026-11-16)
+- Lakehouse staging + MI dashboards (internal/lakehouse, BR-07/BR-09):
+  analytics Event + Sink interface, thread-safe MemorySink, JSONL
+  ParquetLine staging format (no external deps); pure MI aggregations —
+  contributions-by-month, employer delinquency (PENALTY_APPLIED sums),
+  cohort retention, and BuildDashboard (AUM, monthly contributions,
+  penalties outstanding, active members, fund mix) with tenant filtering.
+- Member chatbot (internal/chatbot, BR-09): deterministic no-LLM intent
+  classifier (longest-keyword-first, English + Pidgin keywords),
+  i18n-bundle responder with locale→English→key fallback, USSD menu
+  parity codes (1–5).
+- M&A merge tooling (internal/merger, BR-10): roster re-tenanting with
+  PIN-conflict detection (ErrPINConflict lists conflicts), ordered
+  MergePlan (data-recapture → trial-migration → balance-proof →
+  PenCom-approval → cutover → decommission), and BalanceProof
+  (per-member + total kobo equality with detailed mismatch errors).
+- Scheme wind-up (internal/windup, SCM-14): strict forward-only
+  lifecycle Initiated→AssetsLiquidated→BenefitsComputed→Distributed→
+  Closed, statutory DistributionOrder, and integer ProRata with the
+  remainder kobo to the largest balance (exact-sum invariant tested).
+- TigerBeetle ops-maturity gate (internal/tbgate, AC-05): six required
+  capabilities (replication-3node, failover-drill, backup-restore-drill,
+  soak-test-72h, dual-control-export, ledger-replay-parity), Assess
+  adopt/missing decision, and LedgerParity replay comparison. Postgres
+  remains the default ledger until Assess passes with evidence.
+
+## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services
-2. Lakehouse (Parquet/Delta/Spark/Sedona), chatbot, MI dashboards (BR-07/09)
-3. M&A book-merge tooling (BR-10), scheme wind-up (SCM-14)
-4. TigerBeetle ops-maturity gate review (AC-05) — Postgres fallback active
+2. Production lakehouse infra (Parquet/Delta/Spark) fed by the
+   lakehouse staging sink; ML models for BR-07 analytics
+3. TigerBeetle cluster rollout once tbgate.Assess passes (AC-05) —
+   Postgres ledger remains default until then
