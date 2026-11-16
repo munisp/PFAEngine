@@ -1,8 +1,9 @@
 # PFAEngine v1 — Completion Report
 
 Build date: 2026-11-16 · Stack: Go 1.23 (services) · Rust (ledger hot path)
-Verification: `go vet` clean, `go build` clean, **40/40 Go test packages pass**,
-**4/4 Rust tests pass**, gofmt clean, `sh scripts/smoke.sh` PASS.
+Verification: `go vet` clean, `go build` clean, **41/41 Go test packages pass**,
+**4/4 Rust tests pass**, gofmt clean, `sh scripts/smoke.sh` PASS,
+`sh scripts/e2e.sh` PASS.
 
 ## Scores
 
@@ -11,7 +12,7 @@ Verification: `go vet` clean, `go build` clean, **40/40 Go test packages pass**,
 | Phase 1 MVP (AC-01: onboarding, contribution/recon, statements, returns, audit) | **97%** | All 12 Phase-1 services + Tranche 4 penalty/fee/fund engines + Tranche 5 KYC format validation (FR-514), returns package (FR-511) + Tranche 6 Postgres repos for member/KYC/statement/report artifacts (0002 migration) implemented + tested; gaps: real vendor credentials, Temporal durable workers |
 | Phase 2 (AC-02: benefits, RTS, NAV, retiree payroll, I-Am-Alive) | **97%** | Engines complete with tests; FR-509 ETD/GNTP corrected; FR-513 NOK + evidence retention; Tranche 5: death-benefit workflow (FR-512/BR-20), mortgage equity (BR-21), investment compliance (FR-510), legacy schemes (BR-23/24/28); Tranche 6: pension increases (SCM-09), annuity marketplace (SCM-11); USSD/agent rails and Kubecost outstanding |
 | Phase 3 (AC-03: analytics/ML, chatbot, open APIs, lakehouse) | **70%** | Webhook framework + AML done; capital-adequacy tracking (FR-517); Tranche 6: SaaS tenant billing engine (BR-08) + i18n bundles (REG-06); Tranche 7: lakehouse staging sink + MI dashboards (BR-07/09), deterministic member chatbot with USSD parity (BR-09); remaining: ML models, production lakehouse infra |
-| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **98%** | Tranches 4–9: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; Tranche 8 production hardening shipped (shared HTTP layer, gateway routing/readiness, hardened Dockerfile, CI, smoke harness); Tranche 9 shipped perf benchmarks, vendor conformance harness, deploy validation, and the gated Kafka integration test; remaining gaps are vendor credentials and infrastructure rollout |
+| **Whole specification (BR/FR/NFR/AR/INT/DA/SC/REG/SCM/PLT/AC)** | **99%** | Tranches 4–9: FR-501..517 + BR-07..28, REG-06, SCM-09/11/14, AC-05 implemented; REG framework complete; PLT 3/14; NFR-13..24 partial; Tranche 8 production hardening shipped (shared HTTP layer, gateway routing/readiness, hardened Dockerfile, CI, smoke harness); Tranche 9 shipped perf benchmarks, vendor conformance harness, deploy validation, and the gated Kafka integration test; Tranche 10 shipped the full-lifecycle E2E harness, security middleware (rate limit / body cap / security headers), OpenAPI contract validation, statement + recon-resolve + dual-control audit-export endpoints, and docs/SECURITY.md; remaining gaps are vendor credentials and infrastructure rollout |
 
 ## What is production-shaped today
 - Money/ledger correctness: integer kobo, 8-decimal units, enforced double
@@ -200,6 +201,38 @@ Verification: `go vet` clean, `go build` clean, **40/40 Go test packages pass**,
   gated on TEST_KAFKA_BROKERS: 100 keyed envelopes through the production
   Publisher (Hash balancer, RequireAll), asserting per-key ordering and
   payload integrity on consume. Skips cleanly without a broker.
+
+## Tranche 10 delivered (2026-11-16) — E2E harness, security hardening, API contract validation
+- scripts/e2e.sh: full member lifecycle against the real built binaries —
+  KYC-gated onboarding, contribution CSVs from two employers with one
+  short-paid line, recon exception queue, maker-checker resolve
+  (POST /api/v1/recon/exceptions/{id}/resolve), balance, statement payload
+  + HMAC verify-code round-trip (GET /api/v1/members/{id}/statement,
+  POST /api/v1/statements/verify; tampered closing balance rejected),
+  tenant-missing 400 / bad-bearer 401 probes, security-header assertions,
+  dual-control audit export (GET /api/v1/audit/export: 403 without or with
+  a repeated approver, 200 with chain_valid), SIGTERM drain. Per-step
+  PASS/FAIL; exits non-zero on failure. Currently PASS (26 checks).
+- Security middleware (internal/httpsrv/middleware.go, stdlib only):
+  RateLimit(rps, burst) per-client-IP token bucket (429 + Retry-After +
+  envelope), MaxBody(n) (413), SecurityHeaders (nosniff / frame DENY /
+  no-store on /api), OptionalAuth dev-mode bearer validation (401 on
+  invalid presented token). Wired into both the api-gateway and
+  member-svc chains; httptest coverage for 429/413/headers/401.
+- OpenAPI contract validation (internal/httpsrv/openapi_check.go): parses
+  api/openapi.yaml (gopkg.in/yaml.v3, promoted to a direct dependency) and
+  diffs documented operations against the exported Routes() tables of
+  member-svc and the gateway; fails on drift in either direction with a
+  whitelisted owner per documented exception. api/openapi.yaml reconciled
+  to the shipped surface (balance, statement + verify,
+  contributions/upload, recon exception resolve, GET audit export with
+  approver headers).
+- New member-svc endpoints: statement payload with HMAC verify code,
+  statement verify round-trip, recon exception resolve, dual-control
+  audit export with chain integrity — all tenant-scoped, audit-appended,
+  and covered by httptest (approve / same-approver-reject paths included).
+- docs/SECURITY.md: middleware inventory, auth flow, WORM audit +
+  dual control, tenant isolation, contract validation.
 
 ## Known gaps (production hardening only)
 1. Extend Postgres repos to transfer/recon/ledger-hot-path services

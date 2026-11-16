@@ -16,8 +16,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/munisp/pfaengine/internal/audit"
+	"github.com/munisp/pfaengine/internal/authn"
 	"github.com/munisp/pfaengine/internal/contribution"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/kyc"
@@ -25,15 +27,18 @@ import (
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/money"
 	"github.com/munisp/pfaengine/internal/recon"
+	"github.com/munisp/pfaengine/internal/statement"
 )
 
 // deps bundles the domain stores the handlers operate on.
 type deps struct {
-	kyc     *kyc.Service
-	members *member.Registry
-	ledger  *ledger.Ledger
-	recon   *recon.Engine
-	audit   *audit.Store
+	kyc        *kyc.Service
+	members    *member.Registry
+	ledger     *ledger.Ledger
+	recon      *recon.Engine
+	audit      *audit.Store
+	authn      *authn.Service
+	stmtSecret []byte
 }
 
 func main() {
@@ -42,24 +47,63 @@ func main() {
 		kyc: kyc.NewService(salt,
 			kyc.MockProvider{ProviderName: "mock-nimc"},
 			kyc.MockProvider{ProviderName: "mock-dojah"}),
-		members: member.NewRegistry(),
-		ledger:  ledger.New(),
-		recon:   recon.NewEngine(),
-		audit:   audit.NewStore(),
+		members:    member.NewRegistry(),
+		ledger:     ledger.New(),
+		recon:      recon.NewEngine(),
+		audit:      audit.NewStore(),
+		authn:      authn.NewService(httpsrv.Getenv("SIGNING_SECRET", "dev-signing-secret-0123456789")),
+		stmtSecret: []byte(httpsrv.Getenv("STATEMENT_SIGNING_SECRET", "dev-statement-signing-secret")),
 	}
 	srv := httpsrv.New("member-svc", ":"+httpsrv.Getenv("PORT", "8096"), d.handler())
 	log.Fatal(srv.Run())
 }
 
-// handler builds the tenant-scoped API surface. Health probes are added by
-// httpsrv.New outside the tenant middleware.
+// routeEntry is one registered API route.
+type routeEntry struct {
+	method  string
+	pattern string
+	handler func(*deps) http.HandlerFunc
+}
+
+// apiRoutes is the single source of truth for the mux and the exported
+// route table (OpenAPI contract test).
+var apiRoutes = []routeEntry{
+	{"POST", "/api/v1/members", func(d *deps) http.HandlerFunc { return d.createMember }},
+	{"GET", "/api/v1/members/{id}/balance", func(d *deps) http.HandlerFunc { return d.balance }},
+	{"GET", "/api/v1/members/{id}/statement", func(d *deps) http.HandlerFunc { return d.statementJSON }},
+	{"POST", "/api/v1/statements/verify", func(d *deps) http.HandlerFunc { return d.verifyStatement }},
+	{"POST", "/api/v1/contributions/upload", func(d *deps) http.HandlerFunc { return d.uploadContributions }},
+	{"GET", "/api/v1/recon/exceptions", func(d *deps) http.HandlerFunc { return d.exceptions }},
+	{"POST", "/api/v1/recon/exceptions/{id}/resolve", func(d *deps) http.HandlerFunc { return d.resolveException }},
+	{"GET", "/api/v1/audit/export", func(d *deps) http.HandlerFunc { return d.auditExport }},
+}
+
+// Routes returns the registered route table as "METHOD /path" strings for
+// the OpenAPI contract test.
+func Routes() []string {
+	out := make([]string, 0, len(apiRoutes))
+	for _, e := range apiRoutes {
+		out = append(out, e.method+" "+e.pattern)
+	}
+	return out
+}
+
+// handler builds the tenant-scoped API surface behind the Tranche 10
+// security chain: security headers -> per-IP rate limit -> body cap ->
+// tenant enforcement -> optional bearer-token validation. Health probes are
+// added by httpsrv.New outside this chain.
 func (d *deps) handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/members", d.createMember)
-	mux.HandleFunc("GET /api/v1/members/{id}/balance", d.balance)
-	mux.HandleFunc("POST /api/v1/contributions/upload", d.uploadContributions)
-	mux.HandleFunc("GET /api/v1/recon/exceptions", d.exceptions)
-	return httpsrv.Tenant(mux)
+	for _, e := range apiRoutes {
+		mux.HandleFunc(e.method+" "+e.pattern, e.handler(d))
+	}
+	var h http.Handler = mux
+	h = httpsrv.Tenant(h)
+	h = httpsrv.OptionalAuth(d.authn)(h)
+	h = httpsrv.MaxBody(10 << 20)(h)
+	h = httpsrv.RateLimit(100, 200)(h)
+	h = httpsrv.SecurityHeaders(h)
+	return h
 }
 
 // createMember onboards a member: NIN verification (mandatory, FR-101) and
@@ -213,6 +257,116 @@ func (d *deps) exceptions(w http.ResponseWriter, r *http.Request) {
 		out = []*recon.Exception{}
 	}
 	httpsrv.WriteJSON(w, http.StatusOK, out)
+}
+
+// resolveException applies a maker-checker resolution to an open exception
+// (§6.2). The resolver identity comes from the X-Actor header.
+func (d *deps) resolveException(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Resolution string `json:"resolution"`
+	}
+	if err := decode(r, &in); err != nil {
+		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
+		return
+	}
+	switch in.Resolution {
+	case "AUTO_MATCH", "RECLASSIFY", "REFUND":
+	default:
+		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST",
+			errors.New("resolution must be AUTO_MATCH, RECLASSIFY or REFUND"))
+		return
+	}
+	id := r.PathValue("id")
+	actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+	if actor == "" {
+		actor = "ops-unknown"
+	}
+	if err := d.recon.Resolve(id, in.Resolution, actor); err != nil {
+		status := http.StatusConflict
+		if strings.Contains(err.Error(), "not found") {
+			status = http.StatusNotFound
+		}
+		httpsrv.WriteError(w, status, "RESOLVE_FAILED", err)
+		return
+	}
+	tenant := httpsrv.TenantOf(r)
+	d.audit.Append(audit.Record{TenantID: tenant, Actor: actor, Action: "recon.exception.resolved",
+		EntityType: "exception", EntityID: id, After: map[string]any{"resolution": in.Resolution}})
+	httpsrv.WriteJSON(w, http.StatusOK, map[string]string{"id": id, "resolution": in.Resolution, "resolved_by": actor})
+}
+
+// statementJSON returns the member's statement payload with the
+// HMAC verification code (FR-501); the closing balance is the live ledger
+// balance for the member's RSA.
+func (d *deps) statementJSON(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	p, ok := d.members.Person(id)
+	if !ok {
+		httpsrv.WriteError(w, http.StatusNotFound, "NOT_FOUND", errors.New("member not found"))
+		return
+	}
+	tenant := httpsrv.TenantOf(r)
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = time.Now().UTC().Format("2006-01")
+	}
+	closing := d.ledger.Balance(rsaAccount(id))
+	payload := statement.Payload{
+		ID: "stmt-" + id + "-" + period, TenantID: tenant, RSAID: id,
+		MemberName: p.FullName, RSAPIN: id, Period: period,
+		ClosingBalance: closing, GeneratedAt: time.Now().UTC(),
+	}
+	payload.VerifyCode = statement.Sign(d.stmtSecret, tenant, id, period, closing)
+	d.audit.Append(audit.Record{TenantID: tenant, Actor: "member-svc", Action: "statement.generated",
+		EntityType: "statement", EntityID: payload.ID})
+	httpsrv.WriteJSON(w, http.StatusOK, payload)
+}
+
+// verifyStatement re-checks a statement verification code (QR round-trip,
+// FR-501): callers present the RSA, period, closing balance and code.
+func (d *deps) verifyStatement(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		RSAID       string     `json:"rsa_id"`
+		Period      string     `json:"period"`
+		ClosingKobo money.Kobo `json:"closing_kobo"`
+		Code        string     `json:"code"`
+	}
+	if err := decode(r, &in); err != nil {
+		httpsrv.WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
+		return
+	}
+	valid := statement.Verify(d.stmtSecret, httpsrv.TenantOf(r), in.RSAID, in.Period, in.ClosingKobo, in.Code)
+	httpsrv.WriteJSON(w, http.StatusOK, map[string]bool{"valid": valid})
+}
+
+// auditExport returns the tenant's hash-chained audit slice under dual
+// control (X-Approver-1 / X-Approver-2 must be two distinct staff
+// identities) together with the chain integrity check (SC-02, §6.3).
+func (d *deps) auditExport(w http.ResponseWriter, r *http.Request) {
+	tenant := httpsrv.TenantOf(r)
+	if q := strings.TrimSpace(r.URL.Query().Get("tenant")); q != "" && q != tenant {
+		httpsrv.WriteError(w, http.StatusForbidden, "TENANT_MISMATCH",
+			errors.New("query tenant does not match X-Tenant-ID"))
+		return
+	}
+	a1 := strings.TrimSpace(r.Header.Get("X-Approver-1"))
+	a2 := strings.TrimSpace(r.Header.Get("X-Approver-2"))
+	events, err := d.audit.Export(tenant, a1, a2)
+	if err != nil {
+		httpsrv.WriteError(w, http.StatusForbidden, "DUAL_CONTROL_REQUIRED", err)
+		return
+	}
+	if events == nil {
+		events = []audit.Event{}
+	}
+	httpsrv.WriteJSON(w, http.StatusOK, map[string]any{
+		"tenant":      tenant,
+		"count":       len(events),
+		"events":      events,
+		"chain_valid": d.audit.Verify() == nil,
+		"approved_by": []string{a1, a2},
+		"exported_at": time.Now().UTC(),
+	})
 }
 
 // receiptsFromCSV builds custodian receipts from the optional 5th CSV

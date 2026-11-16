@@ -200,6 +200,34 @@ Any rules-engine change that alters these numbers fails CI.
   gated on `TEST_KAFKA_BROKERS`: 100 keyed messages round-tripped with
   per-key hash-partition ordering and payload integrity asserted.
 
+## Tranche 10: E2E lifecycle harness, security hardening, API contract validation
+
+- `scripts/e2e.sh`: full member lifecycle against the real built binaries —
+  onboarding (KYC-gated) → contribution CSVs from two employers (one line
+  short-paid) → recon exception queue → maker-checker resolve
+  (`POST /api/v1/recon/exceptions/{id}/resolve`) → balance → statement
+  payload + HMAC verify-code round-trip (`GET /api/v1/members/{id}/statement`,
+  `POST /api/v1/statements/verify`, good code accepted / tampered rejected) →
+  tenant-missing 400 and bad-bearer 401 probes → dual-control audit export
+  (`GET /api/v1/audit/export`, 403 without/with-same approver, 200 with a
+  verified chain) → SIGTERM drain. PASS/FAIL per step, non-zero on failure.
+- Security middleware (`internal/httpsrv/middleware.go`, stdlib only):
+  `RateLimit(rps, burst)` per-client-IP token bucket (429 + `Retry-After` +
+  JSON envelope), `MaxBody(n)` request cap (413), `SecurityHeaders`
+  (nosniff, `X-Frame-Options: DENY`, `Cache-Control: no-store` on /api), and
+  `OptionalAuth` (dev-mode bearer validation: a presented-but-invalid token
+  is 401). All wired into both the api-gateway and member-svc chains.
+- OpenAPI contract validation (`internal/httpsrv/openapi_check.go`): parses
+  `api/openapi.yaml` and diffs documented operations against the exported
+  route tables (`Routes() []string`) of member-svc and the gateway; the test
+  fails on any documented-but-unimplemented or implemented-but-undocumented
+  route, with a whitelisted owner named for each documented exception.
+  `api/openapi.yaml` was reconciled to the shipped surface (balance,
+  statement + verify, contributions/upload, recon exception resolve, GET
+  audit export).
+- `docs/SECURITY.md`: middleware inventory, auth flow, WORM audit and
+  dual-control, tenant isolation.
+
 ## Honest caveats (v3 scope)
 
 - Flutter app is source-scaffolded (Flutter SDK not available here);

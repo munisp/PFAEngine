@@ -70,6 +70,8 @@ func backends() []backend {
 		{"member-svc", "/api/v1/members", "MEMBER_SERVICE_URL", "http://member-svc:8096"},
 		{"member-svc", "/api/v1/contributions", "CONTRIBUTION_SERVICE_URL", "http://member-svc:8096"},
 		{"member-svc", "/api/v1/recon", "RECON_SERVICE_URL", "http://member-svc:8096"},
+		{"member-svc", "/api/v1/statements", "STATEMENT_SERVICE_URL", "http://member-svc:8096"},
+		{"member-svc", "/api/v1/audit", "AUDIT_SERVICE_URL", "http://member-svc:8096"},
 		{"kyc", "/api/v1/kyc", "KYC_SERVICE_URL", "http://kyc:8082"},
 		{"benefit", "/api/v1/benefits", "BENEFIT_SERVICE_URL", "http://benefit:8092"},
 		{"transfer", "/api/v1/transfers", "TRANSFER_SERVICE_URL", "http://transfer:8093"},
@@ -168,9 +170,30 @@ func main() {
 	})
 	mux.Handle("/v1/", httpsrv.Tenant(rateLimited(limiter, tenantMux)))
 
-	srv := httpsrv.New("api-gateway", ":"+httpsrv.Getenv("PORT", "8080"), mux,
+	// Tranche 10 security chain: headers -> per-IP rate limit -> body cap.
+	var handler http.Handler = mux
+	handler = httpsrv.MaxBody(10 << 20)(handler)
+	handler = httpsrv.RateLimit(200, 400)(handler)
+	handler = httpsrv.SecurityHeaders(handler)
+
+	srv := httpsrv.New("api-gateway", ":"+httpsrv.Getenv("PORT", "8080"), handler,
 		httpsrv.WithReady(allReady(bs)))
 	log.Fatal(srv.Run())
+}
+
+// Routes returns the gateway's route table for the OpenAPI contract test:
+// concrete routes as "METHOD /path" and reverse-proxy mounts as
+// "PROXY /prefix".
+func Routes() []string {
+	out := []string{
+		"POST /v1/webhooks",
+		"GET /v1/webhooks/deliveries",
+		"POST /v1/events",
+	}
+	for _, b := range backends() {
+		out = append(out, "PROXY "+b.prefix)
+	}
+	return out
 }
 
 func rateLimited(b *tokenBucket, next http.Handler) http.Handler {

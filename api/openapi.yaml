@@ -70,18 +70,27 @@ paths:
       summary: Post approved schedule to member accounts (cash P1; units P2)
       tags: [Contributions & Employers]
       responses: { '200': { description: Posted } }
-  /v1/reconciliation/exceptions:
+  /v1/contributions/upload:
+    post:
+      summary: Upload employer contribution schedule CSV (parse -> recon -> ledger post)
+      tags: [Contributions & Employers]
+      parameters:
+        - { name: employer, in: query, schema: { type: string } }
+        - { name: period, in: query, schema: { type: string } }
+      responses: { '201': { description: Reconciled and posted }, '422': { description: Schedule invalid } }
+  /v1/recon/exceptions:
     get:
       summary: List unmatched remittances/suspense items with aging
       tags: [Reconciliation]
       responses: { '200': { description: Exceptions } }
-  /v1/reconciliation/{id}/resolve:
+  /v1/recon/exceptions/{id}/resolve:
     post:
-      summary: Resolve exception (auto-match, reclassify, refund)
+      summary: Resolve exception (auto-match, reclassify, refund) — maker-checker
       tags: [Reconciliation]
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
-      responses: { '200': { description: Resolved } }
+        - { name: X-Actor, in: header, required: true, schema: { type: string } }
+      responses: { '200': { description: Resolved }, '404': { description: Not found }, '409': { description: Already resolved } }
   /v1/members/{id}/contributions:
     get:
       summary: Member contribution history
@@ -89,6 +98,21 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: History } }
+  /v1/members/{id}/balance:
+    get:
+      summary: Member RSA balance from the ledger (integer kobo)
+      tags: [Contributions & Employers]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Balance }, '404': { description: Unknown member } }
+  /v1/members/{id}/statement:
+    get:
+      summary: On-demand statement payload with HMAC verification code (<5s)
+      tags: [Statements & Reporting]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: period, in: query, schema: { type: string } }
+      responses: { '200': { description: Statement payload + verify_code }, '404': { description: Unknown member } }
   /v1/members/{id}/statement.pdf:
     get:
       summary: On-demand QR-verifiable statement PDF (<5s)
@@ -96,6 +120,11 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: PDF, content: { application/pdf: {} } } }
+  /v1/statements/verify:
+    post:
+      summary: Verify a statement HMAC code (QR round-trip)
+      tags: [Statements & Reporting]
+      responses: { '200': { description: '{valid: bool}' } }
   /v1/statements/schedules:
     post:
       summary: Recurring e-delivery schedules (quarterly default)
@@ -109,9 +138,13 @@ paths:
         - { name: return_code, in: path, required: true, schema: { type: string } }
       responses: { '200': { description: Return draft } }
   /v1/audit/export:
-    post:
-      summary: Export hash-chained audit slice (staff-only, dual control)
+    get:
+      summary: Export hash-chained audit slice with integrity check (staff-only, dual control)
       tags: [Statements & Reporting]
+      parameters:
+        - { name: tenant, in: query, schema: { type: string } }
+        - { name: X-Approver-1, in: header, required: true, schema: { type: string } }
+        - { name: X-Approver-2, in: header, required: true, schema: { type: string } }
       responses: { '200': { description: Export }, '403': { description: Dual control required } }
   /v1/claims:
     post:
