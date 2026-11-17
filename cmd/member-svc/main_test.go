@@ -20,6 +20,7 @@ import (
 	"github.com/munisp/pfaengine/internal/ekyc"
 	"github.com/munisp/pfaengine/internal/fraud"
 	"github.com/munisp/pfaengine/internal/funds"
+	"github.com/munisp/pfaengine/internal/geo"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/kyb"
 	"github.com/munisp/pfaengine/internal/kyc"
@@ -68,6 +69,7 @@ func newTestDeps() *deps {
 	d.docupload = docupload.New(ce)
 	d.aml = aml.NewService()
 	d.ekycIntel = ekyc.NewClient("")
+	d.geo = geo.New(d.branch, nil)
 	d.ekyc = ekyc.New(d.ekycIntel, d.kyc, ce)
 	d.kyb = kyb.New(d.aml, ce)
 	d.crm = crm.New(ce, d.memberFacts)

@@ -1,0 +1,713 @@
+# ---------------------------------------------------------------------------
+# PFAEngine — zero-trust network policy set (Cilium)
+#
+# Namespace: pfaengine. Selectors use the same `app: <service>` labels as
+# deploy/k8s/base.yaml. Port matrix mirrors deploy/docker-compose.yml:
+#
+#   api-gateway 8080   identity 8081      kyc 8082        member 8083
+#   contribution 8084  reconciliation 8085 ledger 8086    statement 8087
+#   reporting 8088     notification 8089  audit 8090      employer-portal 8091
+#   benefit 8092       transfer 8093      fund-pricing 8094 member-svc 8096
+#   kyc-service 8105   ml-serve 8077      ollama 11434    falkordb 6379
+#   postgres 5432      kafka 9092         temporal 7233   minio 9000
+#   opensearch 9200    worker (no listener — Temporal task-queue client)
+#
+# Posture: default-deny ingress AND egress for every pod in pfaengine;
+# traffic is opened per-dependency below (L3/L4 everywhere, L7 HTTP where it
+# buys real reduction: ml-serve /score, kyc-service OCR endpoints).
+#
+# Rollout: with `policyEnforcementMode: "default"` (see values.yaml) these
+# policies enforce only on endpoints they select — apply, observe with
+# `hubble observe --verdict DROPPED`, fix gaps, THEN flip the cluster to
+# enforcement "always" and enable default-deny. See docs/CILIUM-EBPF.md.
+# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# 0. Posture
+# ===========================================================================
+
+# Default-deny ingress+egress for every endpoint in pfaengine. Uses the
+# explicit enableDefaultDeny form (Cilium >= 1.12): endpoints are placed in
+# default-deny even though this policy carries no allow rules of its own —
+# the additive allow policies below punch the holes.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: pfaengine
+spec:
+  description: "Zero-trust posture: deny everything not explicitly allowed."
+  endpointSelector: {}
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+---
+# Kubelet/node health probes (/healthz, /readyz) originate from the node
+# (reserved:host identity) and are otherwise dropped by default-deny.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-node-health-probes
+  namespace: pfaengine
+spec:
+  description: "Kubelet liveness/readiness probes (HTTP /healthz,/readyz from the node)."
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+---
+# Cluster DNS: every pod may resolve via kube-dns/CoreDNS. The L7 `dns` rule
+# makes answers visible to Cilium — REQUIRED for the toFQDNs policies
+# (notification vendors) to learn IP<->name mappings.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-kube-dns
+  namespace: pfaengine
+spec:
+  description: "All pods -> CoreDNS UDP/TCP 53, with DNS L7 visibility."
+  endpointSelector: {}
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+          rules:
+            dns:
+              - matchPattern: "*"
+---
+# ===========================================================================
+# 1. Edge: api-gateway
+# ===========================================================================
+
+# World -> api-gateway:8080. Behind an EKS NLB with
+# externalTrafficPolicy=Local the client source IP is preserved; rate limiting
+# and authn stay app-layer (internal/httpsrv) — this is the L3/L4 gate only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api-gateway-ingress
+  namespace: pfaengine
+spec:
+  description: "Public edge: world -> api-gateway:8080 only."
+  endpointSelector:
+    matchLabels: { app: api-gateway }
+  ingress:
+    - fromEntities:
+        - world
+      toPorts:
+        - ports:
+            - { port: "8080", protocol: TCP }
+---
+# api-gateway -> backends (route table in cmd/api-gateway/main.go: member-svc,
+# kyc, benefit, transfer; employer-portal + remaining services are mounted
+# per-tenant rollout, so all Go HTTP services are allowed). Plus its declared
+# data dependencies: postgres, kafka.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: api-gateway-egress
+  namespace: pfaengine
+spec:
+  description: "api-gateway -> Go backends (8081-8096), postgres:5432, kafka:9092."
+  endpointSelector:
+    matchLabels: { app: api-gateway }
+  egress:
+    - toEndpoints:
+        - matchExpressions:
+            - key: app
+              operator: In
+              values:
+                - identity
+                - kyc
+                - member
+                - contribution
+                - reconciliation
+                - ledger
+                - statement
+                - reporting
+                - notification
+                - audit
+                - employer-portal
+                - benefit
+                - transfer
+                - fund-pricing
+                - member-svc
+      toPorts:
+        - ports:
+            - { port: "8081", protocol: TCP }
+            - { port: "8082", protocol: TCP }
+            - { port: "8083", protocol: TCP }
+            - { port: "8084", protocol: TCP }
+            - { port: "8085", protocol: TCP }
+            - { port: "8086", protocol: TCP }
+            - { port: "8087", protocol: TCP }
+            - { port: "8088", protocol: TCP }
+            - { port: "8089", protocol: TCP }
+            - { port: "8090", protocol: TCP }
+            - { port: "8091", protocol: TCP }
+            - { port: "8092", protocol: TCP }
+            - { port: "8093", protocol: TCP }
+            - { port: "8094", protocol: TCP }
+            - { port: "8096", protocol: TCP }
+    - toEndpoints:
+        - matchLabels: { app: postgres }
+      toPorts:
+        - ports:
+            - { port: "5432", protocol: TCP }
+    - toEndpoints:
+        - matchLabels: { app: kafka }
+      toPorts:
+        - ports:
+            - { port: "9092", protocol: TCP }
+---
+# Backend side of the gateway fan-out: every Go HTTP service accepts traffic
+# from api-gateway (and from member-svc, which calls sibling engines on
+# workflow fan-out paths).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: go-services-ingress-internal
+  namespace: pfaengine
+spec:
+  description: "Go services accept their listener port from api-gateway + member-svc only."
+  endpointSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - identity
+          - kyc
+          - member
+          - contribution
+          - reconciliation
+          - ledger
+          - statement
+          - reporting
+          - notification
+          - audit
+          - employer-portal
+          - benefit
+          - transfer
+          - fund-pricing
+          - member-svc
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: api-gateway }
+        - matchLabels: { app: member-svc }
+      toPorts:
+        - ports:
+            - { port: "8081", protocol: TCP }
+            - { port: "8082", protocol: TCP }
+            - { port: "8083", protocol: TCP }
+            - { port: "8084", protocol: TCP }
+            - { port: "8085", protocol: TCP }
+            - { port: "8086", protocol: TCP }
+            - { port: "8087", protocol: TCP }
+            - { port: "8088", protocol: TCP }
+            - { port: "8089", protocol: TCP }
+            - { port: "8090", protocol: TCP }
+            - { port: "8091", protocol: TCP }
+            - { port: "8092", protocol: TCP }
+            - { port: "8093", protocol: TCP }
+            - { port: "8094", protocol: TCP }
+            - { port: "8096", protocol: TCP }
+---
+# ===========================================================================
+# 2. Shared datastore egress for the Go services
+# ===========================================================================
+
+# Every Go service (incl. worker) persists to postgres — DATABASE_URL is the
+# shared boot dependency (see deploy/docker-compose.yml depends_on).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: go-services-egress-postgres
+  namespace: pfaengine
+spec:
+  description: "All Go services + worker -> postgres:5432 (TLS/SCRAM still app-side)."
+  endpointSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - api-gateway
+          - identity
+          - kyc
+          - member
+          - contribution
+          - reconciliation
+          - ledger
+          - statement
+          - reporting
+          - notification
+          - audit
+          - employer-portal
+          - benefit
+          - transfer
+          - fund-pricing
+          - member-svc
+          - worker
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: postgres }
+      toPorts:
+        - ports:
+            - { port: "5432", protocol: TCP }
+---
+# Kafka producers/consumers: services with a compose depends_on kafka plus
+# member-svc (event fan-out) and worker (workflow activity results).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kafka-clients-egress
+  namespace: pfaengine
+spec:
+  description: "Kafka producers/consumers -> kafka:9092 (PLAINTEXT listener)."
+  endpointSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - api-gateway
+          - contribution
+          - reconciliation
+          - notification
+          - audit
+          - member-svc
+          - worker
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: kafka }
+      toPorts:
+        - ports:
+            - { port: "9092", protocol: TCP }
+---
+# Temporal workflow clients: benefit + transfer mount durable workflows;
+# worker (cmd/worker) polls the pfaengine-core task queue on temporal:7233.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: temporal-clients-egress
+  namespace: pfaengine
+spec:
+  description: "benefit/transfer/worker -> temporal:7233 (gRPC frontend)."
+  endpointSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values: [benefit, transfer, worker]
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: temporal }
+      toPorts:
+        - ports:
+            - { port: "7233", protocol: TCP }
+---
+# statement -> minio (object storage for generated statements).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: statement-egress-minio
+  namespace: pfaengine
+spec:
+  description: "statement -> minio:9000 (S3 API)."
+  endpointSelector:
+    matchLabels: { app: statement }
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: minio }
+      toPorts:
+        - ports:
+            - { port: "9000", protocol: TCP }
+---
+# audit -> opensearch (WORM trail is in postgres; opensearch is the search
+# index replica).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: audit-egress-opensearch
+  namespace: pfaengine
+spec:
+  description: "audit -> opensearch:9200 (audit search index)."
+  endpointSelector:
+    matchLabels: { app: audit }
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: opensearch }
+      toPorts:
+        - ports:
+            - { port: "9200", protocol: TCP }
+---
+# ===========================================================================
+# 3. member-svc — the widest east-west client (AI/ML + eKYC fan-out)
+# ===========================================================================
+
+# member-svc egress (postgres/kafka covered by shared policies above):
+#   kyc-service:8105  eKYC document intelligence (L7: OCR/face/liveness only)
+#   ml-serve:8077     FraudFusion inference (L7: /score + /healthz only)
+#   ollama:11434      self-hosted LLM (chatbot rephrase)
+#   falkordb:6379     fraud-ring / KGQA graph store
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: member-svc-egress
+  namespace: pfaengine
+spec:
+  description: "member-svc -> kyc-service/ml-serve (L7-scoped), ollama, falkordb."
+  endpointSelector:
+    matchLabels: { app: member-svc }
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: kyc-service }
+      toPorts:
+        - ports:
+            - { port: "8105", protocol: TCP }
+          rules:
+            http:
+              - { method: GET,  path: /healthz }
+              - { method: POST, path: /ocr }
+              - { method: POST, path: /parse }
+              - { method: POST, path: /extract }
+              - { method: POST, path: /face/compare }
+              - { method: POST, path: /liveness }
+    - toEndpoints:
+        - matchLabels: { app: ml-serve }
+      toPorts:
+        - ports:
+            - { port: "8077", protocol: TCP }
+          rules:
+            http:
+              - { method: GET,  path: /healthz }
+              - { method: POST, path: /score }   # NOT /registry, NOT /reload
+    - toEndpoints:
+        - matchLabels: { app: ollama }
+      toPorts:
+        - ports:
+            - { port: "11434", protocol: TCP }
+    - toEndpoints:
+        - matchLabels: { app: falkordb }
+      toPorts:
+        - ports:
+            - { port: "6379", protocol: TCP }
+---
+# ===========================================================================
+# 4. AI/ML + sidecar ingress (who may talk to the models)
+# ===========================================================================
+
+# ml-serve: only member-svc, only /score + /healthz (model registry and
+# /reload stay unreachable from the network — promotion is out-of-band).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ml-serve-ingress
+  namespace: pfaengine
+spec:
+  description: "ml-serve:8077 accepts member-svc only, L7 paths /score + /healthz."
+  endpointSelector:
+    matchLabels: { app: ml-serve }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: member-svc }
+      toPorts:
+        - ports:
+            - { port: "8077", protocol: TCP }
+          rules:
+            http:
+              - { method: GET,  path: /healthz }
+              - { method: POST, path: /score }
+---
+# kyc-service (Python eKYC sidecar): only member-svc, OCR/face/liveness paths.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kyc-service-ingress
+  namespace: pfaengine
+spec:
+  description: "kyc-service:8105 accepts member-svc only, L7 eKYC paths."
+  endpointSelector:
+    matchLabels: { app: kyc-service }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: member-svc }
+      toPorts:
+        - ports:
+            - { port: "8105", protocol: TCP }
+          rules:
+            http:
+              - { method: GET,  path: /healthz }
+              - { method: POST, path: /ocr }
+              - { method: POST, path: /parse }
+              - { method: POST, path: /extract }
+              - { method: POST, path: /face/compare }
+              - { method: POST, path: /liveness }
+---
+# kyc-service may call out ONLY to ollama (optional VLM cross-validation;
+# KYC_VLM_MODEL). No internet, no datastore access for the document-AI tier.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kyc-service-egress
+  namespace: pfaengine
+spec:
+  description: "kyc-service -> ollama:11434 only."
+  endpointSelector:
+    matchLabels: { app: kyc-service }
+  egress:
+    - toEndpoints:
+        - matchLabels: { app: ollama }
+      toPorts:
+        - ports:
+            - { port: "11434", protocol: TCP }
+---
+# ollama: only its two consumers may generate.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: ollama-ingress
+  namespace: pfaengine
+spec:
+  description: "ollama:11434 accepts member-svc + kyc-service only."
+  endpointSelector:
+    matchLabels: { app: ollama }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: member-svc }
+        - matchLabels: { app: kyc-service }
+      toPorts:
+        - ports:
+            - { port: "11434", protocol: TCP }
+---
+# falkordb: only member-svc runs graph queries.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: falkordb-ingress
+  namespace: pfaengine
+spec:
+  description: "falkordb:6379 accepts member-svc only."
+  endpointSelector:
+    matchLabels: { app: falkordb }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: member-svc }
+      toPorts:
+        - ports:
+            - { port: "6379", protocol: TCP }
+---
+# ===========================================================================
+# 5. Data tier ingress (the crown jewels)
+# ===========================================================================
+
+# postgres:5432 — only the Go services + worker. NOT reachable from
+# kyc-service/ml-serve/ollama/falkordb (PII blast-radius control).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: postgres-ingress
+  namespace: pfaengine
+spec:
+  description: "postgres:5432 accepts Go services + worker only."
+  endpointSelector:
+    matchLabels: { app: postgres }
+  ingress:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app
+              operator: In
+              values:
+                - api-gateway
+                - identity
+                - kyc
+                - member
+                - contribution
+                - reconciliation
+                - ledger
+                - statement
+                - reporting
+                - notification
+                - audit
+                - employer-portal
+                - benefit
+                - transfer
+                - fund-pricing
+                - member-svc
+                - worker
+      toPorts:
+        - ports:
+            - { port: "5432", protocol: TCP }
+---
+# kafka:9092 — only declared producers/consumers.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kafka-ingress
+  namespace: pfaengine
+spec:
+  description: "kafka:9092 accepts api-gateway/contribution/reconciliation/notification/audit/member-svc/worker."
+  endpointSelector:
+    matchLabels: { app: kafka }
+  ingress:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app
+              operator: In
+              values:
+                - api-gateway
+                - contribution
+                - reconciliation
+                - notification
+                - audit
+                - member-svc
+                - worker
+      toPorts:
+        - ports:
+            - { port: "9092", protocol: TCP }
+---
+# temporal:7233 — workflow frontend for benefit/transfer/worker.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: temporal-ingress
+  namespace: pfaengine
+spec:
+  description: "temporal:7233 accepts benefit/transfer/worker only."
+  endpointSelector:
+    matchLabels: { app: temporal }
+  ingress:
+    - fromEndpoints:
+        - matchExpressions:
+            - key: app
+              operator: In
+              values: [benefit, transfer, worker]
+      toPorts:
+        - ports:
+            - { port: "7233", protocol: TCP }
+---
+# minio:9000 — statement service only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: minio-ingress
+  namespace: pfaengine
+spec:
+  description: "minio:9000 accepts statement only."
+  endpointSelector:
+    matchLabels: { app: minio }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: statement }
+      toPorts:
+        - ports:
+            - { port: "9000", protocol: TCP }
+---
+# opensearch:9200 — audit service only.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: opensearch-ingress
+  namespace: pfaengine
+spec:
+  description: "opensearch:9200 accepts audit only."
+  endpointSelector:
+    matchLabels: { app: opensearch }
+  ingress:
+    - fromEndpoints:
+        - matchLabels: { app: audit }
+      toPorts:
+        - ports:
+            - { port: "9200", protocol: TCP }
+---
+# ===========================================================================
+# 6. World egress — vendor APIs only, by FQDN
+# ===========================================================================
+
+# notification -> Termii SMS + WhatsApp Business Cloud API (HTTPS only).
+# Vendor base URLs from internal/vendors/env.go:
+#   https://v3.api.termii.com      (Termii SMS/OTP)
+#   https://graph.facebook.com     (WhatsApp Cloud API)
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: notification-egress-vendors
+  namespace: pfaengine
+spec:
+  description: "notification -> Termii/WhatsApp vendor APIs on 443, FQDN-pinned."
+  endpointSelector:
+    matchLabels: { app: notification }
+  egress:
+    - toFQDNs:
+        - matchName: api.termii.com
+        - matchPattern: "*.api.termii.com"   # v3.api.termii.com
+        - matchName: graph.facebook.com
+      toPorts:
+        - ports:
+            - { port: "443", protocol: TCP }
+---
+# employer-portal -> Remita (live RRR generation for remittance files;
+# REMITA_BASE_URL, production https://www.remita.net, demo remitademo.net).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: employer-portal-egress-remita
+  namespace: pfaengine
+spec:
+  description: "employer-portal -> Remita payment rails on 443, FQDN-pinned."
+  endpointSelector:
+    matchLabels: { app: employer-portal }
+  egress:
+    - toFQDNs:
+        - matchName: www.remita.net
+        - matchName: remitademo.net
+      toPorts:
+        - ports:
+            - { port: "443", protocol: TCP }
+---
+# member-svc identity-proofing vendors (Smile ID, Dojah) — used only when the
+# live adapters are configured (SMILE_ID_*/DOJAH_* env; mock mode otherwise).
+# internal/vendors/env.go: api.smileidentity.com, api.dojah.io.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: member-svc-egress-identity-vendors
+  namespace: pfaengine
+spec:
+  description: "member-svc -> Smile ID / Dojah identity-proofing APIs on 443."
+  endpointSelector:
+    matchLabels: { app: member-svc }
+  egress:
+    - toFQDNs:
+        - matchName: api.smileidentity.com
+        - matchName: api.dojah.io
+      toPorts:
+        - ports:
+            - { port: "443", protocol: TCP }
+# NOTE: PenCom rails (PENCAP/RTS/PSSP base URLs) get their own toFQDNs rules
+# once the bilateral specs land — see docs/PENCOM-RAILS.md. Everything else
+# to the world stays denied by default-deny-all.
+---
+# ---------------------------------------------------------------------------
+# OPTIONAL: Prometheus scraping of Cilium/agent + app metrics.
+# Enable once the monitoring namespace is known; keep agents scrapeable
+# without opening node-wide access.
+# apiVersion: cilium.io/v2
+# kind: CiliumNetworkPolicy
+# metadata:
+#   name: allow-prometheus-scrape
+#   namespace: pfaengine
+# spec:
+#   endpointSelector: {}
+#   ingress:
+#     - fromEndpoints:
+#         - matchLabels:
+#             k8s:io.kubernetes.pod.namespace: monitoring
+#             k8s:app.kubernetes.io/name: prometheus
+#       toPorts:
+#         - ports:
+#             - { port: "9962", protocol: TCP }   # cilium-agent metrics
+# ---------------------------------------------------------------------------

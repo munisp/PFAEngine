@@ -11,3 +11,4 @@ dist/
 /member-svc
 __pycache__/
 *.pyc
+/analytics-svc

@@ -1,0 +1,23 @@
+# Grafana datasources-as-code: Postgres `analytics` schema.
+# Env-driven so the same file works in compose and on-prem (NFR-11).
+# Compose sets POSTGRES_HOST/PORT/DB/USER/PASSWORD on the grafana service.
+apiVersion: 1
+
+datasources:
+  - name: PFAEngine Analytics
+    uid: pfaengine-analytics
+    type: postgres
+    access: proxy
+    url: ${POSTGRES_HOST}:${POSTGRES_PORT}
+    user: ${POSTGRES_USER}
+    jsonData:
+      database: ${POSTGRES_DB}
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    editable: false

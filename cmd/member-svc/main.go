@@ -39,6 +39,7 @@ import (
 	"github.com/munisp/pfaengine/internal/esg"
 	"github.com/munisp/pfaengine/internal/fraud"
 	"github.com/munisp/pfaengine/internal/funds"
+	"github.com/munisp/pfaengine/internal/geo"
 	"github.com/munisp/pfaengine/internal/glidepath"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/i18n"
@@ -159,6 +160,9 @@ type deps struct {
 	pssp         *pencomrails.PSSPClient
 	payMu        sync.Mutex
 	paySchedules map[string]payroll.Schedule
+	// Geospatial engine: PostGIS-backed when DATABASE_URL is set, in-memory
+	// haversine otherwise. Wraps the branch registry.
+	geo *geo.Engine
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -186,12 +190,14 @@ func main() {
 	var innovateRepo *store.InnovateRepo
 	var caseRepo *store.CaseRepo
 	var snapRepo *store.SnapshotRepo
+	var geoDB *store.DB
 	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
 		db, err := store.Open(context.Background(), dsn)
 		if err != nil {
 			log.Fatalf("member-svc: DATABASE_URL set but store.Open failed: %v", err)
 		}
 		defer db.Close()
+		geoDB = db
 		onbRepo = store.NewOnboardingRepo(db)
 		prefsRepo = store.NewPrefsRepo(db)
 		mpgRepo = store.NewMPGRepo(db)
@@ -304,6 +310,9 @@ func main() {
 		d.pssp = c
 		log.Printf("member-svc: pencom rails: PSSP configured")
 	}
+
+	// Geospatial: PostGIS KNN when Postgres is up, in-memory haversine else.
+	d.geo = geo.New(d.branch, geoDB)
 
 	// Gap-5 persistence: attach the snapshot sink to every stateful engine
 	// and rehydrate from Postgres before any seeding runs (seeders are
@@ -594,6 +603,9 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/pencom/transfers/{id}/confirm", func(d *deps) http.HandlerFunc { return d.pencomTransferConfirm }},
 	{"POST", "/api/v1/pencom/pssp/schedules", func(d *deps) http.HandlerFunc { return d.psspSubmit }},
 	{"GET", "/api/v1/pencom/pssp/schedules/{ref}", func(d *deps) http.HandlerFunc { return d.psspStatus }},
+	// Geospatial: PostGIS KNN nearest-branch + state coverage.
+	{"GET", "/api/v1/geo/branches/nearest", func(d *deps) http.HandlerFunc { return d.geoBranchesNearest }},
+	{"GET", "/api/v1/geo/coverage", func(d *deps) http.HandlerFunc { return d.geoCoverage }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for

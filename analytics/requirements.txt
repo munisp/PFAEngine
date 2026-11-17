@@ -1,0 +1,4 @@
+duckdb>=1.1
+psycopg2-binary>=2.9
+pyarrow>=17
+pandas>=2.2

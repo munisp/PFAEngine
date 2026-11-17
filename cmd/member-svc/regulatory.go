@@ -161,6 +161,7 @@ func (d *deps) branchAdd(w http.ResponseWriter, r *http.Request) {
 		httpsrv.WriteError(w, 400, "BAD_REQUEST", err)
 		return
 	}
+	d.geoUpsertBranch(in.TenantID, b) // PostGIS write-through (nil-safe)
 	d.auditReg(r, "branch.added", "branch", b.ID, b.Name)
 	httpsrv.WriteJSON(w, 201, b)
 }

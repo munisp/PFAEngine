@@ -1,0 +1,142 @@
+{
+  "uid": "pfa-platform-overview",
+  "title": "Platform Overview",
+  "description": "AUM, member growth, contribution velocity, SLA compliance. Source: Postgres analytics schema (gold models). Money panels display naira (kobo/100).",
+  "tags": ["pfaengine", "analytics", "gold"],
+  "timezone": "Africa/Lagos",
+  "refresh": "5m",
+  "time": { "from": "now-1y", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total AUM (₦)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT sum(aum_kobo) / 100.0 AS aum_naira FROM analytics.gold_fund_aum_daily WHERE dt = (SELECT max(dt) FROM analytics.gold_fund_aum_daily)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total members",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT total_members FROM analytics.gold_member_growth_daily ORDER BY dt DESC LIMIT 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Contributions last month (₦)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT sum(gross_kobo) / 100.0 AS gross_naira FROM analytics.gold_contribution_monthly_by_employer WHERE month = (SELECT max(month) FROM analytics.gold_contribution_monthly_by_employer)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Case SLA compliance (latest month, %)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round(100.0 * (1.0 - sum(breached_cases)::numeric / nullif(sum(total_cases), 0)), 1) AS sla_pct FROM analytics.gold_case_sla_compliance WHERE month = (SELECT max(month) FROM analytics.gold_case_sla_compliance)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 90 }, { "color": "green", "value": 98 } ] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "AUM by fund (₦)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT dt AS \"time\", fund_name AS metric, aum_kobo / 100.0 AS value FROM analytics.gold_fund_aum_daily WHERE $__timeFilter(dt) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Member growth (cumulative + daily new)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT dt AS \"time\", 'total' AS metric, total_members AS value FROM analytics.gold_member_growth_daily WHERE $__timeFilter(dt) UNION ALL SELECT dt AS \"time\", 'new' AS metric, new_members AS value FROM analytics.gold_member_growth_daily WHERE $__timeFilter(dt) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Contribution velocity (monthly gross, ₦)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT month AS \"time\", sum(gross_kobo) / 100.0 AS gross_naira, sum(voluntary_kobo) / 100.0 AS voluntary_naira FROM analytics.gold_contribution_monthly_by_employer WHERE $__timeFilter(month) GROUP BY month ORDER BY 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

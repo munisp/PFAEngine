@@ -1,0 +1,19 @@
+# PFAEngine network-security overlay: base workloads + Cilium policy layer.
+#
+#   kubectl apply -k deploy/k8s/cilium/
+#
+# Order note: CNPs/TracingPolicies are inert until Cilium (+Tetragon) is the
+# active CNI — applying this overlay before Cilium is installed fails on the
+# CRDs, so install Cilium first (helm, see README.md in this directory), then
+# apply this overlay. Re-applying after Cilium installation is idempotent.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../base.yaml            # namespace + workloads (unchanged upstream file)
+  - network-policies.yaml   # zero-trust CNPs (cilium.io/v2)
+  - tetragon.yaml           # runtime TracingPolicies (cilium.io/v1alpha1)
+
+# Intentionally no `namespace:` transformer and no commonLabels: base.yaml
+# already pins namespace/labels, and policy selectors depend on the exact
+# `app: <service>` label set.

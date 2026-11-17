@@ -13,6 +13,8 @@ import DocReview from './views/DocReview';
 import Content from './views/Content';
 import Branches from './views/Branches';
 import Funds from './views/Funds';
+import Analytics from './views/Analytics';
+import BranchMap from './views/BranchMap';
 
 // Staff operations portal: reconciliation exceptions, claims maker-checker,
 // audit export (dual control) — the compliance cockpit (BR-09, FR-502).
@@ -22,7 +24,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [token, setToken] = useState<string>();
-  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance' | 'cases' | 'crm' | 'kycops' | 'docreview' | 'content' | 'branches' | 'fundsnav'>('cases');
+  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance' | 'cases' | 'crm' | 'kycops' | 'docreview' | 'content' | 'branches' | 'fundsnav' | 'analytics' | 'branchmap'>('cases');
   const [error, setError] = useState('');
 
   const api = new Api(import.meta.env.VITE_API_BASE ?? 'http://localhost:8080', tenantId, token);
@@ -67,6 +69,8 @@ export default function App() {
           <button onClick={() => setView('content')}>Content</button>
           <button onClick={() => setView('branches')}>Branches</button>
           <button onClick={() => setView('fundsnav')}>Funds</button>
+          <button onClick={() => setView('analytics')}>Analytics</button>
+          <button onClick={() => setView('branchmap')}>Map</button>
           <button onClick={() => setView('recon')}>Reconciliation</button>
           <button onClick={() => setView('claims')}>Claims</button>
           <button onClick={() => setView('audit')}>Audit export</button>
@@ -82,6 +86,8 @@ export default function App() {
       {view === 'content' && <Content api={api} />}
       {view === 'branches' && <Branches api={api} />}
       {view === 'fundsnav' && <Funds api={api} />}
+      {view === 'analytics' && <Analytics api={api} />}
+      {view === 'branchmap' && <BranchMap api={api} />}
       {view === 'recon' && <ReconQueue api={api} />}
       {view === 'claims' && <ClaimsQueue api={api} />}
       {view === 'audit' && <AuditExport api={api} />}

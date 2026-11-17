@@ -1,0 +1,205 @@
+# ---------------------------------------------------------------------------
+# PFAEngine — Cilium Helm values (network security + observability layer)
+#
+# Chart:   cilium/cilium  (pin a released version, e.g. --version 1.16.5)
+# Release: helm install cilium cilium/cilium -n kube-system -f values.yaml
+#
+# Design goals (see docs/CILIUM-EBPF.md):
+#   * kube-proxy replacement + eBPF host routing  -> no iptables on the data
+#     path; holds up at the 1M-RSA scale target (NFR-03) with per-flow cost
+#     independent of service count.
+#   * Hubble (relay + UI + Prometheus flow metrics + on-node flow export)
+#     -> NDPA 2023 / PenCom-grade audit evidence for every east-west flow.
+#   * WireGuard transparent encryption           -> defence-in-depth for
+#     member PII in flight between nodes (app-layer TLS is unaffected).
+#   * Bandwidth manager                          -> eBPF EDT pacing, protects
+#     ledger/postgres neighbours from noisy pods.
+#   * Prometheus + ServiceMonitors everywhere    -> agent/operator/Hubble
+#     metrics land in the existing monitoring stack.
+# ---------------------------------------------------------------------------
+
+# --- kube-proxy replacement -------------------------------------------------
+# kubeProxyReplacement=true removes kube-proxy/iptables from the service data
+# path. k8sServiceHost/Port MUST point at the (kube-proxy-free) API endpoint;
+# on EKS that is the cluster endpoint (private DNS name of the control plane).
+kubeProxyReplacement: "true"
+# k8sServiceHost: "<EKS cluster endpoint host>"   # aws eks describe-cluster --query 'cluster.endpoint'
+# k8sServicePort: "443"
+
+# eBPF host routing: packets bypass the host iptables/netfilter stack entirely
+# (bpf.hostLegacyRouting=false is the eBPF host-routing mode).
+bpf:
+  hostLegacyRouting: false
+  # Larger CT/NAT maps for the 1M-RSA connection churn target.
+  ctTcpMax: "1048576"
+  natMax: "1048576"
+  lbExternalClusterIP: false
+
+# --- CNI / IPAM --------------------------------------------------------------
+# Default for EKS when Cilium fully replaces the aws-vpc-cni plugin
+# (aws-node DaemonSet removed): Kubernetes IPAM hands pod IPs out of the
+# node pod CIDRs. This works with the standard `aws eks` VPC CNI removal
+# runbook documented in docs/CILIUM-EBPF.md.
+ipam:
+  mode: kubernetes
+  operator:
+    clusterPoolIPv4PodCIDRList: ["10.42.0.0/16"] # adjust to cluster --pod-cidr / node spec
+cni:
+  # Cilium owns /etc/cni/net.d exclusively (no chaining with aws-cni).
+  exclusive: true
+
+# --- ALTERNATIVE: AWS ENI IPAM (native VPC pod IPs) --------------------------
+# Preferred when pods need native VPC IPs (SG-per-pod-style reachability,
+# direct ALB-to-pod, no podCIDR NAT). Requires the aws-node removal steps in
+# the runbook and subnets sized for ENI density.
+# ipam:
+#   mode: eni
+# eni:
+#   enabled: true
+#   subnetTagsFilter: "kubernetes.io/role/cni=1"  # tag dedicated pod subnets
+#   awsEnablePrefixDelegation: true               # /28 prefixes per ENI slot
+#   updateEC2AdapterLimitViaAPI: true
+# egressMasqueradeInterfaces: "eth0"              # SNAT pod -> internet egress
+# routingMode: native                             # native routing with ENI IPAM
+
+# --- Tunneling / native routing ---------------------------------------------
+# Overlay (VXLAN) is the safe default with kubernetes IPAM on EKS. With ENI
+# IPAM use routingMode: native (see block above).
+tunnelProtocol: vxlan
+routingMode: tunnel
+
+# --- Transparent encryption (WireGuard) --------------------------------------
+# Node-to-node traffic (pod-to-pod across nodes + host traffic) is encrypted
+# in the kernel by WireGuard; zero application changes. Rotate keys via pod
+# restart or `cilium encrypt key rotate`? (agent-side key rotation is
+# automatic on node identity change; see docs).
+encryption:
+  enabled: true
+  type: wireguard
+  nodeEncryption: true
+  # strictMode:                     # enable AFTER validating reachability —
+  #   enabled: true                 # refuses to fall back to plaintext for
+  #   allowParallelWireGuardConnections: true  # podCIDRs outside the mesh
+
+# --- Bandwidth manager --------------------------------------------------------
+# eBPF-based EDT (earliest departure time) pacing; enforces the kubernetes
+# bandwidth annotations without a CNI bandwidth plugin or netem qdiscs.
+bandwidthManager:
+  enabled: true
+  bbr: false # keep cubic; flip to true only after host tcp_bbr validation
+
+# --- Load balancing / NAT ------------------------------------------------------
+loadBalancer:
+  mode: hybrid        # DS R for service LB, SNAT for egress — good EKS default
+  algorithm: maglev   # consistent hashing: resilient to backend reschedules
+maglev:
+  tableSize: "65521"
+
+# --- Hubble observability ------------------------------------------------------
+hubble:
+  enabled: true
+
+  # Flow visibility at L7 where proxies allow it. DNS visibility is what makes
+  # the toFQDNs egress policies enforceable and auditable.
+  tls:
+    enabled: true
+    auto:
+      enabled: true
+      method: certmanager   # or cronJob if cert-manager is not installed
+      certValidityDuration: 1095
+      certManagerIssuerRef:
+        name: cilium-ca
+        kind: ClusterIssuer
+
+  metrics:
+    enableOpenMetrics: true
+    enabled:
+      - dns:query;ignoreAAAA
+      - drop
+      - tcp
+      - flow
+      - port-distribution
+      - icmp
+      # HTTP visibility for services fronted by Cilium L7 policy (member-svc
+      # -> ml-serve /score etc.). labelsContext kept explicit to bound
+      # cardinality in the 1M-RSA topology.
+      - httpV2:exemplars=true;labelsContext=source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction
+    serviceMonitor:
+      enabled: true
+      # labels: { release: kube-prometheus-stack }  # match your Prometheus selector
+
+  # Audit-grade flow export: every accepted/denied flow is written JSONL to a
+  # hostPath on each node. Ship with Fluent Bit/Vector (or Wazuh, AR-09) to the
+  # SIEM; retention handled by the shipper, not the node.
+  export:
+    static:
+      enabled: true
+      filePath: /var/run/cilium/hubble/events.log
+      fileMaxSizeMb: 100
+      fileMaxBackups: 10          # 10x100MB per node; SIEM shipper owns retention
+      fieldMask: []
+      allowList: []
+      denyList: []
+      # To ALSO tee flows to the agent stdout (handy for `kubectl logs` triage
+      # in dev clusters; noisy in prod) use a dynamic exporter instead:
+      #   hubble export config via ConfigMap, see docs/CILIUM-EBPF.md day-2.
+
+  relay:
+    enabled: true
+    replicas: 2                 # HA: relay fronts every node's Hubble peer
+    retryTimeout: 5s
+    prometheus:
+      enabled: true
+      serviceMonitor:
+        enabled: true
+
+  ui:
+    enabled: true
+    replicas: 2
+    frontend:
+      # Expose behind the platform ingress/SSO in regulated deployments;
+      # ClusterIP + kubectl port-forward is the safe default.
+      service:
+        type: ClusterIP
+    backend:
+      extraEnv: []
+
+# --- Prometheus metrics: agent + operator --------------------------------------
+prometheus:
+  enabled: true
+  port: 9962
+  serviceMonitor:
+    enabled: true
+    # labels: { release: kube-prometheus-stack }
+    # NOTE: an ingress NetworkPolicy for :9962 from the monitoring namespace
+    # is included (commented) in network-policies.yaml — enable with it.
+
+operator:
+  replicas: 2                   # HA operator (leader-elected)
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+  # keep operator off the data path: it only reconciles identities/CECs
+
+# --- Policy enforcement mode ---------------------------------------------------
+# "default": endpoints enforce policy only once a CNP selects them (audit-
+# friendly rollout). "always": every endpoint is default-deny even with no
+# policy. Migration runbook: start "default", apply policies, then "always".
+policyEnforcementMode: "default"
+
+# --- Hardening / production posture ---------------------------------------------
+rollOutCiliumPods: true          # rolling restart agents on ConfigMap change
+hostFirewall:
+  enabled: false                 # node-level CNP stage: enable in phase 2
+socketLB:
+  hostNamespaceOnly: false
+k8sNetworkPolicy:
+  enabled: true                  # also honour stock networking.k8s.io policies
+annotateK8sNode: true
+# Drop-netkit / devices: on EKS the primary ENI is eth0; leave auto-detect.
+
+# Resource guards for the agent at scale.
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits:   { cpu: "1",  memory: 1Gi }

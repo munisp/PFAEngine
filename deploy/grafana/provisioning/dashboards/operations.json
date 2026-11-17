@@ -1,0 +1,112 @@
+{
+  "uid": "pfa-operations",
+  "title": "Operations — Cases & KYC",
+  "description": "Case SLA compliance and eKYC conversion funnel from the analytics schema (gold models).",
+  "tags": ["pfaengine", "analytics", "ops"],
+  "timezone": "Africa/Lagos",
+  "refresh": "5m",
+  "time": { "from": "now-1y", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Cases per month (total vs breached)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT month AS \"time\", sum(total_cases) AS total, sum(breached_cases) AS breached, sum(open_cases) AS open_cases FROM analytics.gold_case_sla_compliance WHERE $__timeFilter(month) GROUP BY month ORDER BY 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    },
+    {
+      "id": 2,
+      "type": "bargauge",
+      "title": "eKYC funnel (cumulative sessions per stage)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT stage, sessions FROM analytics.gold_kyc_funnel ORDER BY stage_order"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true }, "showUnfilled": true }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "SLA compliance by case type / queue (latest month)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT case_type, queue, total_cases, open_cases, resolved_cases, breached_cases, round(sla_compliance_bps / 100.0, 1) AS sla_pct, round(avg_resolution_hours::numeric, 1) AS avg_resolve_h FROM analytics.gold_case_sla_compliance WHERE month = (SELECT max(month) FROM analytics.gold_case_sla_compliance) ORDER BY breached_cases DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "sla_pct" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "yellow", "value": 90 }, { "color": "green", "value": 98 } ] } },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "sortBy": [ { "displayName": "breached_cases", "desc": true } ] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Open cases (latest month)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 5, "w": 10, "x": 14, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT sum(open_cases) AS open_cases FROM analytics.gold_case_sla_compliance WHERE month = (SELECT max(month) FROM analytics.gold_case_sla_compliance)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "KYC auto-approval rate (%)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 5, "w": 10, "x": 14, "y": 14 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT round(100.0 * max(sessions) FILTER (WHERE stage = 'auto_approved') / nullif(max(sessions) FILTER (WHERE stage = 'started'), 0), 1) AS auto_approval_pct FROM analytics.gold_kyc_funnel"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

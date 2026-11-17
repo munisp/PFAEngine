@@ -1,0 +1,89 @@
+{
+  "uid": "pfa-employer-health",
+  "title": "Employer Remittance Health",
+  "description": "Employer remittance discipline: schedules posted, months remitted, value remitted, derived health grade (HEALTHY/WATCH/DEFAULTING).",
+  "tags": ["pfaengine", "analytics", "employers"],
+  "timezone": "Africa/Lagos",
+  "refresh": "5m",
+  "time": { "from": "now-1y", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Employers by health grade",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT remittance_health, count(*) AS employers FROM analytics.gold_employer_remittance_health GROUP BY remittance_health ORDER BY remittance_health"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true }, "textMode": "value_and_name" }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Employer remittance health register",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT employer_name, rc_number, compliance_state, schedules_posted, schedules_total, round(schedule_posted_bps / 100.0, 1) AS posted_pct, months_remitted, round(total_remitted_kobo / 100.0, 0) AS remitted_naira, last_contribution_date, remittance_health FROM analytics.gold_employer_remittance_health ORDER BY remitted_naira DESC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "remittance_health" },
+            "properties": [
+              { "id": "mappings", "value": [
+                { "type": "value", "options": { "HEALTHY": { "color": "green", "index": 0 } } },
+                { "type": "value", "options": { "WATCH": { "color": "yellow", "index": 1 } } },
+                { "type": "value", "options": { "DEFAULTING": { "color": "red", "index": 2 } } }
+              ] },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "remitted_naira" },
+            "properties": [ { "id": "unit", "value": "short" }, { "id": "decimals", "value": 0 } ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "posted_pct" },
+            "properties": [ { "id": "unit", "value": "percent" }, { "id": "max", "value": 100 }, { "id": "min", "value": 0 } ]
+          }
+        ]
+      },
+      "options": { "showHeader": true }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Monthly remittances by employer (₦)",
+      "datasource": { "type": "postgres", "uid": "pfaengine-analytics" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 19 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT month AS \"time\", employer_name AS metric, gross_kobo / 100.0 AS value FROM analytics.gold_contribution_monthly_by_employer WHERE $__timeFilter(month) ORDER BY 1"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "stacking": { "mode": "normal" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

@@ -561,3 +561,32 @@ Closes gaps 2, 3, 4 and 5 from PFAEngine-competitive-gap-analysis
   regfile, esg). Seeders made idempotent (docslib.SeedStandard,
   literacy.Seed) so restart never duplicates; seq counters restore to
   max+1 so IDs never collide. Round-trip tests in every package.
+
+## Hardening wave — Cilium/eBPF + lakehouse + geospatial (2026-11-17)
+
+- Cilium/eBPF (deploy/k8s/cilium/): kube-proxy-replacement eBPF CNI config,
+  25 CiliumNetworkPolicies (namespace default-deny ingress+egress, per-service
+  L3/L4/L7 least-privilege, FQDN-pinned vendor egress, DNS-only kube-dns),
+  4 Tetragon runtime TracingPolicies (exec allowlist+Sigkill, sensitive-file
+  writes, unexpected outbound connects, escape-syscall alerts), Hubble flow
+  export for NDPA/PenCom audit evidence, kustomize overlay, 4-phase
+  audit-first rollout runbook. Docs: docs/CILIUM-EBPF.md.
+- Lakehouse/analytics (analytics/ + cmd/analytics-svc): medallion lakehouse —
+  full-platform Postgres→parquet bronze (watermarked, per-table fault
+  isolation), DuckDB silver/gold SQL models (member growth, contribution
+  velocity, fund AUM, case SLA bps, KYC funnel, employer remittance health,
+  retirement pipeline), gold materialized to Postgres `analytics` schema.
+  analytics-svc :8097 read-only JSON (fail-closed 503 ANALYTICS_NOT_READY).
+  Grafana provisioning-as-code (3 dashboards, :3001) + analytics-run one-shot
+  compose job. Staff-portal Analytics view (hand-rolled SVG, tsc clean).
+  Docs: docs/ANALYTICS.md (pre/post maturity scores 1/3/2 → 6/6/6).
+- Geospatial (internal/geo + migration 0010_postgis.sql): PostGIS extension +
+  geo_point geography table with GiST KNN; Engine with PostGIS <-> nearest-
+  branch and haversine fallback; state coverage endpoint; branchAdd write-
+  through; compose Postgres switched to postgis/postgis:16-3.4. Apache Sedona
+  batch job spec (analytics/geo/) spatial-joining members to NG state
+  polygons for coverage-gap gold tables. Staff-portal BranchMap view
+  (schematic SVG; MapLibre GL upgrade path documented). Routes:
+  GET /v1/geo/branches/nearest, /v1/geo/coverage. Docs: docs/GEOSPATIAL.md.
+- Verified: 80 Go packages green; 12 analytics python tests OK; sedona job
+  py_compile + selftest; staff-portal build 292KB; all YAML/JSON validated.

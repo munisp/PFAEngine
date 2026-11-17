@@ -1,0 +1,198 @@
+# ---------------------------------------------------------------------------
+# PFAEngine — Tetragon runtime enforcement (eBPF beyond networking)
+#
+# Requires the Tetragon DaemonSet (installs with the Cilium Helm chart when
+# `tetragon.enabled: true`, or standalone: helm install tetragon cilium/tetragon).
+#
+# All four policies are TracingPolicyNamespaced (cilium.io/v1alpha1), pinned to
+# namespace pfaengine — they cannot affect kube-system or other tenants.
+#
+#   1. block-unexpected-exec        ENFORCE (Sigkill) — Go service containers
+#      may only exec the service binary and the healthcheck wget.
+#   2. alert-sensitive-file-writes  ALERT  — writes to /etc/passwd, keys, /root.
+#   3. alert-data-tier-egress       ALERT  — outbound connect from postgres /
+#      ml containers that should be serve-only.
+#   4. alert-container-escape       ALERT  — ptrace/setns/unshare (escape
+#      precursor syscalls) anywhere in the namespace.
+#
+# Tetragon events land in the agent log (JSON) — ship to the SIEM alongside
+# Hubble flows (docs/CILIUM-EBPF.md, day-2 ops).
+# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# 1. Process-execution allowlist for Go service containers (ENFORCE)
+#
+# deploy/Dockerfile produces a static binary at /service (ENTRYPOINT) plus
+# busybox wget for HEALTHCHECK. Anything else executing in these containers
+# is a compromise indicator (reverse shell, dropped binary, cryptominer) and
+# is killed at security_bprm_check — before the program runs.
+#
+# The alpine image's wget is a busybox applet, so the exec path resolves to
+# /bin/busybox; both it and /usr/bin/wget are allowlisted. matchArgs uses
+# NotEqual semantics ("argument differs from EVERY listed value"), i.e. the
+# list is an allowlist.
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: block-unexpected-exec
+  namespace: pfaengine
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - api-gateway
+          - identity
+          - kyc
+          - member
+          - contribution
+          - reconciliation
+          - ledger
+          - statement
+          - reporting
+          - notification
+          - audit
+          - employer-portal
+          - benefit
+          - transfer
+          - fund-pricing
+          - member-svc
+          - worker
+  kprobes:
+    - call: security_bprm_check
+      syscall: false
+      args:
+        - index: 0
+          type: linux_binprm
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: NotEqual
+              values:
+                - /service
+                - /usr/bin/wget
+                - /bin/busybox
+          matchActions:
+            - action: Sigkill
+---
+# ===========================================================================
+# 2. Sensitive-file write watch (ALERT)
+#
+# MAY_WRITE (mask 0x2) on credential material, system auth files, private
+# keys, or /root. Containers run readOnlyRootFilesystem + non-root, so any
+# match here means an escape or a writable mount was abused. Alert only —
+# never Sigkill on file access (false positives must not kill the ledger).
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: alert-sensitive-file-writes
+  namespace: pfaengine
+spec:
+  kprobes:
+    - call: security_file_permission
+      syscall: false
+      args:
+        - index: 0
+          type: file
+          resolve: path
+        - index: 1
+          type: int
+      selectors:
+        # Exact credential/auth files.
+        - matchArgs:
+            - index: 0
+              operator: Equal
+              values:
+                - /etc/passwd
+                - /etc/shadow
+                - /etc/sudoers
+                - /etc/gshadow
+            - index: 1
+              operator: Mask
+              values:
+                - "2" # MAY_WRITE
+        # Credential directories / private-key trees.
+        - matchArgs:
+            - index: 0
+              operator: Prefix
+              values:
+                - /root/
+                - /etc/ssl/private/
+                - /etc/kubernetes/pki/
+            - index: 1
+              operator: Mask
+              values:
+                - "2"
+        # Private-key material anywhere in the filesystem.
+        - matchArgs:
+            - index: 0
+              operator: Postfix
+              values:
+                - .pem
+                - .key
+                - .p12
+                - .pfx
+            - index: 1
+              operator: Mask
+              values:
+                - "2"
+---
+# ===========================================================================
+# 3. Unexpected outbound connect from data/ML tier (ALERT)
+#
+# postgres, mlflow, ml-serve, falkordb and ollama are serve-only: nothing in
+# their images initiates outbound TCP. A tcp_connect from one of these pods
+# is data exfiltration, C2, or a poisoned model pull. Pair with the
+# default-deny egress CNP (which BLOCKS the traffic) — this policy is the
+# detection layer that tells you it was attempted.
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: alert-data-tier-egress
+  namespace: pfaengine
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - postgres
+          - mlflow
+          - ml-serve
+          - falkordb
+          - ollama
+  kprobes:
+    - call: tcp_connect
+      syscall: false
+      args:
+        - index: 0
+          type: sock
+      # No narrowing selectors: every outbound connect from these pods is
+      # worth an event. Default action Post -> JSON event on the node.
+---
+# ===========================================================================
+# 4. Container-escape precursor syscalls (ALERT)
+#
+# ptrace (process injection / credential theft from co-located processes),
+# setns (namespace hopping — e.g. into the host netns), unshare (creating new
+# user/mount namespaces to re-acquire capabilities). None of the PFAEngine
+# workloads use these; debug `kubectl debug`/nsenter sessions SHOULD trip the
+# alert — that is the point (attribution via pod + binary in the event).
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: alert-container-escape-syscalls
+  namespace: pfaengine
+spec:
+  kprobes:
+    - call: sys_ptrace
+      syscall: true
+    - call: sys_setns
+      syscall: true
+    - call: sys_unshare
+      syscall: true

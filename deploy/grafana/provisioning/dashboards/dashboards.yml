@@ -1,0 +1,16 @@
+# Dashboard provisioning: every *.json beside this file is loaded into the
+# "PFAEngine" folder and kept in sync with disk (GitOps-friendly).
+apiVersion: 1
+
+providers:
+  - name: pfaengine
+    orgId: 1
+    folder: PFAEngine
+    folderUid: pfaengine
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

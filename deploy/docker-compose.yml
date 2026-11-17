@@ -12,7 +12,9 @@ x-app-healthcheck: &app-healthcheck
 
 services:
   postgres:
-    image: postgres:16
+    # postgis/postgis ships the PostGIS extension (migration 0010) on a
+    # stock postgres base — same env/volume contract as postgres:16.
+    image: postgis/postgis:16-3.4
     environment:
       POSTGRES_PASSWORD: pfaengine
       POSTGRES_DB: pfaengine
@@ -261,9 +263,59 @@ services:
     ports: ["11434:11434"]
     volumes: ["ollamadata:/root/.ollama"]
 
+  # ---- Analytics lakehouse (analytics/, docs/ANALYTICS.md) ----
+  analytics-svc:
+    # Read-only JSON over the Postgres `analytics` schema for the staff
+    # portal. Fail-closed: 503 ANALYTICS_NOT_READY until analytics-run has
+    # populated the schema — never fake data.
+    build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: analytics-svc } }
+    environment:
+      PORT: "8097"
+      DATABASE_URL: postgres://postgres:pfaengine@postgres:5432/pfaengine
+    ports: ["8097:8097"]
+    depends_on: [postgres]
+    healthcheck:
+      <<: *app-healthcheck
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8097/healthz"]
+
+  analytics-run:
+    # One-shot lakehouse job: Postgres -> bronze parquet -> DuckDB
+    # silver/gold -> export gold into Postgres schema `analytics`.
+    # `docker compose run analytics-run` (profile keeps it out of `up`).
+    # Schedule nightly via cron/systemd for production refresh.
+    build: { context: .., dockerfile: deploy/analytics.Dockerfile }
+    profiles: ["analytics"]
+    environment:
+      DATABASE_URL: postgres://postgres:pfaengine@postgres:5432/pfaengine
+      LAKE_DIR: /lake
+    volumes: ["lakedata:/lake"]
+    depends_on: [postgres]
+    restart: "no"
+
+  grafana:
+    # Dashboards-as-code over the analytics schema (deploy/grafana/).
+    # Port 3001 because 3000 is commonly taken by dev servers.
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: pfaengine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pfaengine
+    ports: ["3001:3000"]
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    depends_on: [postgres]
+
 volumes:
   pgdata:
   mlmodels:
   mlflowartifacts:
   falkordata:
   ollamadata:
+  lakedata:
+  grafanadata:

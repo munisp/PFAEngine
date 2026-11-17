@@ -870,6 +870,16 @@ paths:
       summary: "PenCom rails: poll PSSP schedule processing status"
       tags: [PenComRails]
       responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/geo/branches/nearest:
+    get:
+      summary: "Geo: nearest branches by lat/lng (PostGIS KNN, haversine fallback)"
+      tags: [Geo]
+      responses: { '200': { description: OK } }
+  /v1/geo/coverage:
+    get:
+      summary: "Geo: branch coverage per state"
+      tags: [Geo]
+      responses: { '200': { description: OK } }
   /v1/forms:
     get:
       summary: List published forms (filter — category)
