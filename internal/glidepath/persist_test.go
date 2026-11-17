@@ -110,7 +110,17 @@ func TestPersistRoundTrip(t *testing.T) {
 			t.Fatalf("member %s mismatch: %+v vs %+v", id, ma, mb)
 		}
 	}
-	if sa, sb := a.Switches("t1", ""), b.Switches("t1", ""); !reflect.DeepEqual(sa, sb) {
+	sa, sb := a.Switches("t1", ""), b.Switches("t1", "")
+	// Restore order depends on map iteration / snapshot ordering, so compare
+	// as sets keyed by switch ID rather than by slice position.
+	byID := func(ss []Switch) map[string]Switch {
+		m := make(map[string]Switch, len(ss))
+		for _, s := range ss {
+			m[s.ID] = s
+		}
+		return m
+	}
+	if !reflect.DeepEqual(byID(sa), byID(sb)) {
 		t.Fatalf("switches mismatch: %+v vs %+v", sa, sb)
 	}
 }

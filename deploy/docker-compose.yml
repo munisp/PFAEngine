@@ -18,6 +18,13 @@ services:
     environment:
       POSTGRES_PASSWORD: pfaengine
       POSTGRES_DB: pfaengine
+    # wal_level=logical enables pgoutput logical decoding for Debezium CDC
+    # (deploy/debezium/, migration 0011). Harmless when CDC is off.
+    command:
+      - postgres
+      - -c wal_level=logical
+      - -c max_replication_slots=4
+      - -c max_wal_senders=4
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
 
@@ -200,8 +207,21 @@ services:
       # Gap 5 — engine-state snapshots (db/migrations/0009_snapshots.sql):
       # DATABASE_URL (already shared) enables state_snapshot write-through
       # + boot rehydration for every stateful engine.
+      # Gap 7 — object storage for KYC document blobs (create bucket once:
+      # mc alias set local http://localhost:9000 pfaengine pfaengine123 && mc mb local/kyc-documents).
+      # Production: real S3 endpoint/creds, S3_USE_SSL=true, BLOB_REQUIRED=true.
+      S3_ENDPOINT: minio:9000
+      S3_BUCKET: kyc-documents
+      S3_ACCESS_KEY: pfaengine
+      S3_SECRET_KEY: pfaengine123
+      S3_USE_SSL: "false"
+      # Gap 9 — challenge-response (active) liveness:
+      # EKYC_REQUIRE_CHALLENGE=true  (fail-closed: passive /biometric rejected)
+      # LIVENESS_THRESHOLD=0.60      (mean action score for PASSED)
+      # SMILE_ID_PARTNER_ID / SMILE_ID_API_KEY enable the Smile ID SmartSelfie
+      # provider (assumed endpoint spec — docs/LIVENESS.md).
     ports: ["8096:8096"]
-    depends_on: [postgres, kyc-service]
+    depends_on: [postgres, kyc-service, minio]
     healthcheck:
       <<: *app-healthcheck
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8096/healthz"]
@@ -272,7 +292,11 @@ services:
     environment:
       PORT: "8097"
       DATABASE_URL: postgres://postgres:pfaengine@postgres:5432/pfaengine
+      # CDC watermark for GET /v1/analytics/cdc-status (200 {cdc_enabled:false}
+      # when absent — full refresh is a supported mode, not an error).
+      CDC_WATERMARK_PATH: /lake/bronze/cdc_watermark.json
     ports: ["8097:8097"]
+    volumes: ["lakedata:/lake:ro"]
     depends_on: [postgres]
     healthcheck:
       <<: *app-healthcheck
@@ -310,6 +334,45 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafanadata:/var/lib/grafana
     depends_on: [postgres]
+
+  # ---- CDC: Debezium Postgres -> Kafka -> bronze parquet (docs/CDC.md) ----
+  connect:
+    # Debezium Connect (Kafka Connect + Postgres source connector).
+    image: debezium/connect:2.7
+    profiles: ["cdc"]
+    ports: ["8083:8083"]
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: pfaengine-connect
+      CONFIG_STORAGE_TOPIC: pfaengine_connect_configs
+      OFFSET_STORAGE_TOPIC: pfaengine_connect_offsets
+      STATUS_STORAGE_TOPIC: pfaengine_connect_statuses
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+      # Dead-letter queue: a poison event must not stall the connector.
+      CONNECT_ERRORS_TOLERANCE: all
+      CONNECT_ERRORS_LOG_ENABLE: "true"
+      CONNECT_ERRORS_LOG_INCLUDE_MESSAGES: "true"
+    depends_on: [kafka, postgres]
+    restart: unless-stopped
+
+  cdc-consumer:
+    # Kafka -> bronze parquet applier (analytics/cdc_consumer.py).
+    # Uses the same image/build as analytics-run; runs continuously.
+    build: { context: .., dockerfile: deploy/analytics.Dockerfile }
+    profiles: ["cdc"]
+    command: ["python3", "cdc_consumer.py",
+              "--brokers", "kafka:9092",
+              "--lake", "/lake",
+              "--migrations", "/app/db/migrations"]
+    environment:
+      LAKE_DIR: /lake
+      CDC_WATERMARK_PATH: /lake/bronze/cdc_watermark.json
+    volumes: ["lakedata:/lake"]
+    depends_on: [connect]
+    restart: unless-stopped
 
 volumes:
   pgdata:

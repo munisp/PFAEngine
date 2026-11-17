@@ -29,6 +29,7 @@ import (
 	"github.com/munisp/pfaengine/internal/casemgmt"
 	"github.com/munisp/pfaengine/internal/docupload"
 	"github.com/munisp/pfaengine/internal/kyc"
+	"github.com/munisp/pfaengine/internal/liveness"
 	"github.com/munisp/pfaengine/internal/persist"
 )
 
@@ -36,6 +37,12 @@ var (
 	ErrSessionNotFound = errors.New("ekyc: session not found")
 	ErrBadTransition   = errors.New("ekyc: action not allowed in current state")
 	ErrClientDisabled  = errors.New("ekyc: kyc-service client not configured")
+	// ErrChallengeRequired fails passive-only biometric submission when the
+	// tenant policy (or an issued challenge) demands active liveness.
+	ErrChallengeRequired = errors.New("ekyc: challenge-response liveness is required for this session")
+	// ErrLivenessNotConfigured fails challenge endpoints when no
+	// challenge-response engine is wired (fail-closed).
+	ErrLivenessNotConfigured = errors.New("ekyc: liveness challenge engine not configured")
 )
 
 // ---------------------------------------------------------------------------
@@ -271,6 +278,15 @@ type Session struct {
 	FaceScore      float64 `json:"face_score"`
 	FaceMatched    bool    `json:"face_matched"`
 
+	// Gap 9: challenge-response (active) liveness. ChallengeRequired is set
+	// when a challenge is issued (or forced by tenant policy at engine
+	// level); ChallengePassed/Score hold verdict metadata only — no
+	// biometric material is ever stored on the session.
+	ChallengeRequired bool    `json:"challenge_required,omitempty"`
+	ChallengePassed   bool    `json:"challenge_passed,omitempty"`
+	ChallengeScore    float64 `json:"challenge_score,omitempty"`
+	ChallengeID       string  `json:"challenge_id,omitempty"`
+
 	RiskScore int      `json:"risk_score"`
 	RiskFlags []string `json:"risk_flags,omitempty"`
 	Decision  Decision `json:"decision"`
@@ -298,6 +314,8 @@ const (
 	wLivenessBorderline  = 40
 	wLivenessFail        = 100 // hard reject
 	wFaceClearMismatch   = 100 // hard reject
+	wChallengeFail       = 60  // active-liveness failure: reject w/ negative evidence
+	wChallengeIncomplete = 40  // required challenge never passed: manual review
 
 	threshManualReview = 25
 	threshReject       = 60
@@ -319,6 +337,13 @@ type Engine struct {
 	seq      int
 	now      func() time.Time
 	sink     persist.Sink // nil in pure in-memory mode
+	// Gap 9: active liveness. liveness is the challenge-response engine
+	// (nil disables challenge endpoints, fail-closed); requireChallenge is
+	// the tenant policy (EKYC_REQUIRE_CHALLENGE) that blocks the passive
+	// SubmitBiometric path and forces Decide to manual review until a
+	// challenge passes.
+	liveness         *liveness.Engine
+	requireChallenge bool
 }
 
 func New(intel DocIntel, ks *kyc.Service, ce *casemgmt.Engine) *Engine {
@@ -328,6 +353,13 @@ func New(intel DocIntel, ks *kyc.Service, ce *casemgmt.Engine) *Engine {
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
+
+// SetLiveness wires the Gap-9 challenge-response liveness engine.
+func (e *Engine) SetLiveness(le *liveness.Engine) { e.mu.Lock(); e.liveness = le; e.mu.Unlock() }
+
+// SetRequireChallenge toggles the tenant policy that mandates
+// challenge-response liveness (EKYC_REQUIRE_CHALLENGE).
+func (e *Engine) SetRequireChallenge(on bool) { e.mu.Lock(); e.requireChallenge = on; e.mu.Unlock() }
 
 // AttachSink wires write-through snapshot persistence (NFR-10). Only the
 // exported Session fields persist — raw document/selfie images never leave
@@ -577,6 +609,13 @@ func (e *Engine) SubmitBiometric(tenantID, id string, frames []string, actor str
 	if s.State != StateIdentityCheck {
 		return Session{}, ErrBadTransition
 	}
+	// Gap 9 fail-closed: when active liveness is required (tenant policy or
+	// a challenge already issued for this session) and no challenge has
+	// passed yet, the passive path is closed — use IssueChallenge +
+	// SubmitChallengeResponse instead.
+	if (e.requireChallenge || s.ChallengeRequired) && !s.ChallengePassed {
+		return Session{}, ErrChallengeRequired
+	}
 	if len(frames) == 0 {
 		return Session{}, errors.New("ekyc: at least one selfie frame is required")
 	}
@@ -627,6 +666,103 @@ func (e *Engine) SubmitBiometric(tenantID, id string, frames []string, actor str
 	return *s, nil
 }
 
+// ---------------------------------------------------------------------------
+// Gap 9: challenge-response (active) liveness
+// ---------------------------------------------------------------------------
+
+// ChallengeView is the client-facing rendering of an issued challenge. It
+// deliberately exposes ONLY the action list, nonce and expiry — internal
+// fields (Used, engine state) never leave the engine.
+type ChallengeView struct {
+	ID        string            `json:"id"`
+	SessionID string            `json:"session_id"`
+	Actions   []liveness.Action `json:"actions"`
+	Nonce     string            `json:"nonce"`
+	ExpiresAt time.Time         `json:"expires_at"`
+}
+
+// IssueChallenge enters (or re-arms) the active-liveness step. Guard: the
+// session must be in IDENTITY_CHECK (transitions to BIOMETRIC with a
+// REQUIRED challenge) or already in BIOMETRIC (re-issue; the liveness
+// engine invalidates the prior challenge). Issuing a challenge marks the
+// session challenge-required, which closes the passive SubmitBiometric
+// path fail-closed.
+func (e *Engine) IssueChallenge(tenantID, id, actor string) (view ChallengeView, err error) {
+	var sess Session
+	defer func() { e.persistAfter(&sess, &err) }()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.liveness == nil {
+		return ChallengeView{}, ErrLivenessNotConfigured
+	}
+	s, err := e.get(tenantID, id)
+	if err != nil {
+		return ChallengeView{}, err
+	}
+	if s.State != StateIdentityCheck && s.State != StateBiometric {
+		return ChallengeView{}, ErrBadTransition
+	}
+	ch, err := e.liveness.Issue(id)
+	if err != nil {
+		return ChallengeView{}, err
+	}
+	s.ChallengeRequired = true
+	s.ChallengeID = ch.ID
+	if s.State == StateIdentityCheck {
+		s.State = StateBiometric
+		e.logLocked(s, actor, "STATE", "-> BIOMETRIC (challenge required)")
+	}
+	e.logLocked(s, actor, "CHALLENGE_ISSUED",
+		fmt.Sprintf("challenge=%s actions=%d expires=%s", ch.ID, len(ch.Actions), ch.ExpiresAt.Format(time.RFC3339)))
+	sess = *s
+	return ChallengeView{
+		ID: ch.ID, SessionID: ch.SessionID, Actions: ch.Actions,
+		Nonce: ch.Nonce, ExpiresAt: ch.ExpiresAt,
+	}, nil
+}
+
+// SubmitChallengeResponse verifies a nonce-bound challenge response through
+// the liveness engine and records the verdict metadata on the session.
+// PASSED sets LivenessPassed (and the challenge score); FAIL flags
+// challenge_failed (weight 60 → REJECT with negative evidence). Binding,
+// single-use and expiry errors (nonce mismatch, replay, expired) are
+// returned to the caller and leave the session untouched.
+func (e *Engine) SubmitChallengeResponse(tenantID, id, challengeID, nonce string, results []liveness.ActionResult, actor string) (sess Session, err error) {
+	defer func() { e.persistAfter(&sess, &err) }()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.liveness == nil {
+		return Session{}, ErrLivenessNotConfigured
+	}
+	s, err := e.get(tenantID, id)
+	if err != nil {
+		return Session{}, err
+	}
+	if s.State != StateBiometric {
+		return Session{}, ErrBadTransition
+	}
+	v, err := e.liveness.Respond(challengeID, nonce, results)
+	if err != nil {
+		return Session{}, err
+	}
+	if v.SessionID != id {
+		// A challenge minted for another session must never advance this one.
+		return Session{}, fmt.Errorf("ekyc: challenge %s does not belong to session %s", challengeID, id)
+	}
+	s.ChallengeScore = v.Score
+	s.ChallengeID = v.ChallengeID
+	if v.Passed {
+		s.ChallengePassed = true
+		s.LivenessPassed = true
+		s.LivenessScore = v.Score
+		e.logLocked(s, actor, "CHALLENGE_PASSED", fmt.Sprintf("challenge_score=%.3f actions=%d", v.Score, len(v.Actions)))
+	} else {
+		e.flagLocked(s, "challenge_failed", wChallengeFail)
+		e.logLocked(s, actor, "CHALLENGE_FAILED", fmt.Sprintf("challenge_score=%.3f actions=%d", v.Score, len(v.Actions)))
+	}
+	return *s, nil
+}
+
 // Decide scores the accumulated risk and reaches a decision. MANUAL_REVIEW
 // sessions open a casemgmt KYC_REVIEW case for the ops team. Advances
 // BIOMETRIC -> DECIDED.
@@ -640,6 +776,14 @@ func (e *Engine) Decide(tenantID, id, actor string) (sess Session, err error) {
 	}
 	if s.State != StateBiometric {
 		return Session{}, ErrBadTransition
+	}
+
+	// Gap 9 fail-closed: a session whose policy demands active liveness but
+	// which never passed a challenge must route to a human, never
+	// auto-approve.
+	if (e.requireChallenge || s.ChallengeRequired) && !s.ChallengePassed {
+		e.flagLocked(s, "challenge_incomplete", wChallengeIncomplete)
+		e.logLocked(s, actor, "CHALLENGE_INCOMPLETE", "active liveness required but not passed")
 	}
 
 	hardReject := false

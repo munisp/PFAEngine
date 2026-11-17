@@ -204,6 +204,18 @@ func (e *Engine) ByMember(tenantID, memberID string) []Document {
 	return e.filter(tenantID, func(d *Document) bool { return d.MemberID == memberID })
 }
 
+// Get returns one document by ID (tenant-scoped); used by the Gap-7 blob
+// download handler to resolve the object-storage ref before presigning.
+func (e *Engine) Get(tenantID, id string) (Document, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	d, ok := e.docs[id]
+	if !ok || d.TenantID != tenantID {
+		return Document{}, false
+	}
+	return *d, true
+}
+
 func (e *Engine) filter(tenantID string, ok func(*Document) bool) []Document {
 	e.mu.Lock()
 	var out []Document

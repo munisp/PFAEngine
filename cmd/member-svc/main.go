@@ -24,6 +24,7 @@ import (
 	"github.com/munisp/pfaengine/internal/aml"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
+	"github.com/munisp/pfaengine/internal/blobstore"
 	"github.com/munisp/pfaengine/internal/branch"
 	"github.com/munisp/pfaengine/internal/casemgmt"
 	"github.com/munisp/pfaengine/internal/claimsfast"
@@ -48,6 +49,7 @@ import (
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/literacy"
+	"github.com/munisp/pfaengine/internal/liveness"
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/micropension"
 	"github.com/munisp/pfaengine/internal/mlscore"
@@ -138,8 +140,15 @@ type deps struct {
 	// set). Every stateful engine writes through and rehydrates on boot.
 	snapRepo *store.SnapshotRepo
 	// Tranche 21: PenCom-parity regulatory surface.
-	docslib    *docslib.Library
-	docupload  *docupload.Engine
+	docslib   *docslib.Library
+	docupload *docupload.Engine
+	// Gap 7: document blob storage (nil when S3 is not configured AND
+	// BLOB_REQUIRED=true semantics are handled at boot — blob.go handlers
+	// fail closed with 503 BLOB_UNCONFIGURED on a nil store).
+	blob blobstore.Store
+	// Gap 9: liveness engine (wired by the liveness feature; see
+	// cmd/member-svc/liveness.go).
+	liveness   *liveness.Engine
 	branch     *branch.Engine
 	disclosure *disclosure.Registry
 	news       *news.Engine
@@ -288,6 +297,19 @@ func main() {
 	d.ekyc = ekyc.New(d.ekycIntel, d.kyc, caseEngine)
 	d.kyb = kyb.New(d.aml, caseEngine)
 
+	// Gap 9: challenge-response (active) liveness. EKYC_REQUIRE_CHALLENGE
+	// closes the passive biometric path fail-closed; LIVENESS_THRESHOLD tunes
+	// the verdict; SMILE_ID_* enables vendor-backed SmartSelfie verification.
+	d.liveness = liveness.New(liveness.ThresholdFromEnv())
+	if p := liveness.FromEnv(); p != nil {
+		d.liveness.SetProvider(p)
+		log.Printf("member-svc: liveness: Smile ID SmartSelfie provider configured")
+	} else {
+		log.Printf("member-svc: liveness: local challenge scoring (no vendor provider)")
+	}
+	d.ekyc.SetLiveness(d.liveness)
+	d.ekyc.SetRequireChallenge(strings.EqualFold(httpsrv.Getenv("EKYC_REQUIRE_CHALLENGE", ""), "true"))
+
 	// Gap 3/4: payroll (ERPNext/Frappe HR) + PenCom rails (PENCAP, RTS,
 	// PSSP). All env-configured; absent credentials leave nil clients and
 	// the routes answer 503 RAIL_UNCONFIGURED.
@@ -309,6 +331,20 @@ func main() {
 	if c, err := pencomrails.NewPSSPFromEnv(); err == nil {
 		d.pssp = c
 		log.Printf("member-svc: pencom rails: PSSP configured")
+	}
+
+	// Gap 7: object storage for document blobs (MinIO dev / S3 prod).
+	// Fail-closed: partial S3 config or BLOB_REQUIRED=true aborts boot;
+	// unconfigured dev falls back to the filesystem store with a warning.
+	bs, blobWarn, err := blobstore.FromEnv()
+	if err != nil {
+		log.Fatalf("member-svc: blobstore: %v", err)
+	}
+	d.blob = bs
+	if blobWarn != "" {
+		log.Printf("member-svc: %s", blobWarn)
+	} else {
+		log.Printf("member-svc: blobstore: S3 configured (bucket %s)", httpsrv.Getenv("S3_BUCKET", ""))
 	}
 
 	// Geospatial: PostGIS KNN when Postgres is up, in-memory haversine else.
@@ -555,6 +591,8 @@ var apiRoutes = []routeEntry{
 	{"GET", "/api/v1/forms/versions", func(d *deps) http.HandlerFunc { return d.formVersions }},
 	{"GET", "/api/v1/forms/{id}", func(d *deps) http.HandlerFunc { return d.formGet }},
 	{"POST", "/api/v1/documents", func(d *deps) http.HandlerFunc { return d.docSubmit }},
+	{"POST", "/api/v1/documents/upload", func(d *deps) http.HandlerFunc { return d.docUploadBlob }},
+	{"GET", "/api/v1/documents/{id}/url", func(d *deps) http.HandlerFunc { return d.docDownloadURL }},
 	{"GET", "/api/v1/documents/mine", func(d *deps) http.HandlerFunc { return d.docMine }},
 	{"GET", "/api/v1/documents/pending", func(d *deps) http.HandlerFunc { return d.docPending }},
 	{"POST", "/api/v1/documents/{id}/review", func(d *deps) http.HandlerFunc { return d.docReview }},
@@ -583,6 +621,9 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/ekyc/sessions/{id}/document", func(d *deps) http.HandlerFunc { return d.ekycSubmitDocument }},
 	{"POST", "/api/v1/ekyc/sessions/{id}/identity", func(d *deps) http.HandlerFunc { return d.ekycVerifyIdentity }},
 	{"POST", "/api/v1/ekyc/sessions/{id}/biometric", func(d *deps) http.HandlerFunc { return d.ekycSubmitBiometric }},
+	// Gap 9: challenge-response (active) liveness
+	{"POST", "/api/v1/ekyc/sessions/{id}/challenge", func(d *deps) http.HandlerFunc { return d.ekycIssueChallenge }},
+	{"POST", "/api/v1/ekyc/sessions/{id}/challenge/respond", func(d *deps) http.HandlerFunc { return d.ekycRespondChallenge }},
 	{"POST", "/api/v1/ekyc/sessions/{id}/decide", func(d *deps) http.HandlerFunc { return d.ekycDecide }},
 	{"POST", "/api/v1/ekyc/sessions/{id}/override", func(d *deps) http.HandlerFunc { return d.ekycOverride }},
 	{"GET", "/api/v1/ekyc/health", func(d *deps) http.HandlerFunc { return d.ekycHealth }},

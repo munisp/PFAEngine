@@ -1,0 +1,15 @@
+# Copy this file to android/key.properties and fill in real values.
+# android/key.properties and all *.jks / *.keystore files are gitignored —
+# NEVER commit a real keystore or its passwords.
+#
+# Generate an upload key with:
+#   keytool -genkey -v -keystore android/app/upload-keystore.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias pfaengine-upload
+#
+# Enroll the app in Play App Signing so Google holds the true app-signing key;
+# this keystore is then only the *upload* key (recoverable if lost).
+
+storePassword=REPLACE_ME
+keyPassword=REPLACE_ME
+keyAlias=pfaengine-upload
+storeFile=app/upload-keystore.jks

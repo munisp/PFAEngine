@@ -782,6 +782,16 @@ paths:
       summary: Submit selfie frames (liveness + face match)
       tags: [EKYC]
       responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/challenge:
+    post:
+      summary: Issue active-liveness challenge (randomized actions + nonce, 120s TTL)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/challenge/respond:
+    post:
+      summary: Respond to active-liveness challenge (nonce-bound, single-use)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
   /v1/ekyc/sessions/{id}/decide:
     post:
       summary: Reach risk-scored decision (AUTO_APPROVE/MANUAL_REVIEW/REJECT)
@@ -905,6 +915,16 @@ paths:
       summary: Submit a KYC document
       tags: [Regulatory]
       responses: { '200': { description: OK } }
+  /v1/documents/upload:
+    post:
+      summary: Upload a KYC document blob (base64, 10MB cap, jpeg/png/pdf)
+      tags: [Regulatory]
+      responses: { '201': { description: Created }, '503': { description: Blob store unconfigured } }
+  /v1/documents/{id}/url:
+    get:
+      summary: Presigned download URL (15min TTL; owning member or staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK }, '503': { description: Blob store unconfigured } }
   /v1/documents/mine:
     get:
       summary: List a member's documents

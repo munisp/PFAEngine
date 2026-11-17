@@ -1,0 +1,31 @@
+{
+  "name": "pfaengine-postgres-source",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "pfaengine",
+    "database.dbname": "pfaengine",
+    "topic.prefix": "pfaengine",
+    "plugin.name": "pgoutput",
+    "publication.name": "pfaengine_pub",
+    "publication.autocreate.mode": "filtered",
+    "slot.name": "debezium_slot",
+    "table.include.list": "public.person,public.member,public.rsa_account,public.employer,public.contribution,public.contribution_schedule,public.fund,public.fund_price,public.unit_holding,public.ops_case,public.state_snapshot,public.benefit_claim",
+    "snapshot.mode": "when_needed",
+    "decimal.handling.mode": "string",
+    "tombstones.on.delete": "false",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.delete.tombstone.handling.mode": "rewrite",
+    "transforms.unwrap.add.fields": "op,source.ts_ms,source.lsn",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}

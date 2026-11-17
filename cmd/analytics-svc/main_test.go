@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -188,5 +189,83 @@ func TestHealthz(t *testing.T) {
 	rr := get(t, routes(nil), "/healthz")
 	if rr.Code != 200 {
 		t.Fatalf("healthz: got %d", rr.Code)
+	}
+}
+
+func TestCDCStatusFailClosed(t *testing.T) {
+	// nil querier => 503 like every other endpoint, even though the
+	// payload itself is file-based.
+	rr := get(t, routes(nil), "/v1/analytics/cdc-status")
+	if rr.Code != 503 {
+		t.Fatalf("got %d, want 503", rr.Code)
+	}
+}
+
+func TestCDCStatusDisabledWithoutEnv(t *testing.T) {
+	t.Setenv("CDC_WATERMARK_PATH", "")
+	h := routes(&fakeQuerier{})
+	rr := get(t, h, "/v1/analytics/cdc-status")
+	if rr.Code != 200 {
+		t.Fatalf("got %d", rr.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["cdc_enabled"] != false || body["mode"] != "full-refresh" {
+		t.Fatalf("unexpected: %v", body)
+	}
+}
+
+func TestCDCStatusNoWatermarkYet(t *testing.T) {
+	t.Setenv("CDC_WATERMARK_PATH", t.TempDir()+"/missing.json")
+	h := routes(&fakeQuerier{})
+	rr := get(t, h, "/v1/analytics/cdc-status")
+	if rr.Code != 200 {
+		t.Fatalf("got %d", rr.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["cdc_enabled"] != true || body["status"] != "no_watermark" {
+		t.Fatalf("unexpected: %v", body)
+	}
+}
+
+func TestCDCStatusWithWatermark(t *testing.T) {
+	ts := time.Now().UTC().Add(-5 * time.Second).Format(time.RFC3339)
+	wm := `{"version":1,"seq":42,"lsn":777,"updated_at":"` + ts + `",
+	  "offsets":{"pfaengine.public.member":{"0":12}},
+	  "tables":{"member":{"events":40,"last_seq":42,"last_op":"u",
+	    "last_applied_at":"` + ts + `"}}}`
+	path := t.TempDir() + "/cdc_watermark.json"
+	if err := os.WriteFile(path, []byte(wm), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CDC_WATERMARK_PATH", path)
+	h := routes(&fakeQuerier{})
+	rr := get(t, h, "/v1/analytics/cdc-status")
+	if rr.Code != 200 {
+		t.Fatalf("got %d", rr.Code)
+	}
+	var body struct {
+		CDCEnabled bool    `json:"cdc_enabled"`
+		Status     string  `json:"status"`
+		Seq        int64   `json:"seq"`
+		LagSeconds float64 `json:"lag_seconds"`
+		Tables     map[string]struct {
+			Events     int64   `json:"events"`
+			LagSeconds float64 `json:"lag_seconds"`
+		} `json:"tables"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.CDCEnabled || body.Status != "ok" || body.Seq != 42 {
+		t.Fatalf("unexpected: %+v", body)
+	}
+	if body.LagSeconds < 4 || body.Tables["member"].Events != 40 {
+		t.Fatalf("lag/tables: %+v", body)
 	}
 }

@@ -590,3 +590,39 @@ Closes gaps 2, 3, 4 and 5 from PFAEngine-competitive-gap-analysis
   GET /v1/geo/branches/nearest, /v1/geo/coverage. Docs: docs/GEOSPATIAL.md.
 - Verified: 80 Go packages green; 12 analytics python tests OK; sedona job
   py_compile + selftest; staff-portal build 292KB; all YAML/JSON validated.
+
+## Gap closure — gaps 7/8/9 + CDC analytics uplift (2026-11-17)
+Closes the remaining competitive-analysis gaps and pushes analytics
+maturity 6 -> 8. All Go packages build/vet green; member-svc suite incl.
+OpenAPI contract test green; 34 analytics Python tests OK (1 skip);
+PWA build verified; YAML/JSON/shell linted.
+
+- Gap 7 — object storage for KYC document blobs: internal/blobstore (S3
+  SigV4 backend, zero new deps, hand-rolled signer; filesystem fallback;
+  fail-closed FromEnv, BLOB_REQUIRED for prod). POST /v1/documents/upload
+  (base64, 10MB cap, jpeg/png/pdf allowlist, server-side SHA-256, orphan
+  cleanup) + GET /v1/documents/{id}/url (15min presign, owner-or-staff).
+  Blob bytes never logged/audited/snapshotted. Docs: docs/OBJECT-STORAGE.md.
+  Caveat: MaxBody(10MB) middleware makes effective decoded cap ~7.5MB.
+- Gap 8 — app-store release readiness: PWA->Play via TWA (Bubblewrap
+  config, assetlinks.json template, Play listing + data-safety drafts),
+  Flutter release scaffolding (idempotent scaffold script, signing config,
+  ProGuard, CI workflow release-app.yml building PWA/TWA/AAB on tags).
+  Docs: docs/APP-STORE-RELEASE.md. Actual store submission needs org
+  accounts + keystores (manual).
+- Gap 9 — challenge-response (active) liveness: internal/liveness
+  (crypto/rand nonce, 120s TTL, single-use, threshold 0.60, Smile ID
+  SmartSelfie provider from env, fail-closed on 5xx) wired into
+  internal/ekyc (ChallengeRequired/Passed on Session; SubmitBiometric
+  fail-closed when challenge policy unmet; Decide flags incomplete).
+  Routes: POST /v1/ekyc/sessions/{id}/challenge(+ /respond).
+  Docs: docs/LIVENESS.md. Smile ID endpoint shape is assumed-spec.
+- CDC analytics uplift: deploy/debezium (pgoutput connector config,
+  idempotent register.sh, profile-gated compose services), migration
+  0011_cdc.sql (REPLICA IDENTITY FULL + publication), analytics/
+  cdc_consumer.py (upsert/delete into bronze parquet, watermark),
+  run.py --incremental (dependency-mapped selective gold rebuild),
+  analytics-svc GET /v1/analytics/cdc-status. Compose postgres now runs
+  wal_level=logical. Docs: docs/CDC.md. No live-broker test in sandbox;
+  full refresh remains the authoritative fallback.
+- Fixed pre-existing flaky glidepath TestPersistRoundTrip (set-compare).

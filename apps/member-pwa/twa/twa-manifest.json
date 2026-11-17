@@ -1,0 +1,54 @@
+{
+  "$schema": "https://raw.githubusercontent.com/GoogleChromeLabs/bubblewrap/main/packages/core/twa-manifest-schema.json",
+  "_comment": [
+    "Bubblewrap (TWA) config for the PFAEngine member PWA -> Google Play.",
+    "Regenerate against the live origin with:",
+    "  bubblewrap init --manifest https://app.pfaengine.example/manifest.webmanifest",
+    "then merge the fields below. PLACEHOLDER values (host, fingerprints,",
+    "keystore path) must be replaced before building a release AAB.",
+    "See docs/APP-STORE-RELEASE.md and apps/member-pwa/store/play/."
+  ],
+  "packageId": "com.pfaengine.member",
+  "host": "app.pfaengine.example",
+  "name": "PFAEngine Member",
+  "launcherName": "MyRSA",
+  "display": "standalone",
+  "orientation": "portrait",
+  "themeColor": "#f7f4ee",
+  "navigationColor": "#f7f4ee",
+  "navigationColorDark": "#1c1a17",
+  "navigationDividerColor": "#f7f4ee",
+  "navigationDividerColorDark": "#1c1a17",
+  "backgroundColor": "#f7f4ee",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://app.pfaengine.example/icons/icon-512.png",
+  "maskableIconUrl": "https://app.pfaengine.example/icons/icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://app.pfaengine.example/",
+  "minSdkVersion": 21,
+  "webManifestUrl": "https://app.pfaengine.example/manifest.webmanifest",
+  "fingerprints": [
+    {
+      "name": "sha256_cert_fingerprints",
+      "value": "REPLACE_WITH_APP_SIGNING_KEY_SHA256_FROM_PLAY_CONSOLE_APP_INTEGRITY"
+    }
+  ],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "signingKey": {
+    "path": "./android-upload-key.keystore",
+    "alias": "pfaengine-upload"
+  }
+}

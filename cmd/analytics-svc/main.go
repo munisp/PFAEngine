@@ -15,6 +15,8 @@
 //	/v1/analytics/timeseries?metric=..&from=YYYY-MM-DD&to=YYYY-MM-DD
 //	/v1/analytics/employers/health
 //	/v1/analytics/funds/aum
+//	/v1/analytics/cdc-status            CDC consumer lag/freshness
+//	                                    (reads CDC_WATERMARK_PATH file)
 //
 // Money is integer kobo end-to-end (DA-03); presentation layers format
 // naira. Percentages are integer basis points (10000 = 100%).
@@ -26,7 +28,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"time"
+
+	"encoding/json"
 
 	_ "github.com/lib/pq"
 
@@ -300,6 +305,85 @@ func (q *pgQuerier) FundAUM(ctx context.Context) ([]FundAUM, error) {
 	return out, classify(rows.Err())
 }
 
+// ---- CDC lag surface ----
+
+// cdcWatermark mirrors the JSON written by analytics/cdc_consumer.py
+// (lake/bronze/cdc_watermark.json). Read fresh per request — the file is
+// small and this endpoint is polled by ops tooling, not hot paths.
+type cdcWatermark struct {
+	Seq       int64  `json:"seq"`
+	LSN       any    `json:"lsn"`
+	UpdatedAt string `json:"updated_at"`
+	Tables    map[string]struct {
+		Events        int64  `json:"events"`
+		LastSeq       int64  `json:"last_seq"`
+		LastOp        string `json:"last_op"`
+		LastAppliedAt string `json:"last_applied_at"`
+	} `json:"tables"`
+	Offsets map[string]map[string]int64 `json:"offsets"`
+}
+
+func lagSeconds(ts string) *float64 {
+	t, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return nil
+	}
+	s := time.Since(t).Seconds()
+	if s < 0 {
+		s = 0
+	}
+	return &s
+}
+
+// cdcStatusHandler reports CDC freshness. It deliberately does NOT use
+// the Querier: the watermark is a file produced by the Python consumer,
+// not a Postgres table. Fail-closed semantics are preserved by the
+// caller (q == nil still 503s); when CDC is not configured the endpoint
+// reports cdc_enabled=false because full-refresh analytics is a
+// supported mode, not an error (docs/CDC.md).
+func cdcStatusHandler(wmPath string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if wmPath == "" {
+			appx.JSON(w, 200, map[string]any{
+				"cdc_enabled": false, "mode": "full-refresh"})
+			return
+		}
+		b, err := os.ReadFile(wmPath)
+		if err != nil {
+			appx.JSON(w, 200, map[string]any{
+				"cdc_enabled": true, "status": "no_watermark",
+				"detail": "consumer has not written a watermark yet"})
+			return
+		}
+		var wm cdcWatermark
+		if err := json.Unmarshal(b, &wm); err != nil {
+			appx.JSON(w, 200, map[string]any{
+				"cdc_enabled": true, "status": "unreadable_watermark",
+				"detail": err.Error()})
+			return
+		}
+		tables := map[string]any{}
+		for name, t := range wm.Tables {
+			tables[name] = map[string]any{
+				"events":          t.Events,
+				"last_op":         t.LastOp,
+				"last_applied_at": t.LastAppliedAt,
+				"lag_seconds":     lagSeconds(t.LastAppliedAt),
+			}
+		}
+		appx.JSON(w, 200, map[string]any{
+			"cdc_enabled": true,
+			"status":      "ok",
+			"seq":         wm.Seq,
+			"lsn":         wm.LSN,
+			"updated_at":  wm.UpdatedAt,
+			"lag_seconds": lagSeconds(wm.UpdatedAt),
+			"tables":      tables,
+			"offsets":     wm.Offsets,
+		})
+	}
+}
+
 // ---- HTTP layer ----
 
 func parseDate(s string) *time.Time {
@@ -393,6 +477,19 @@ func routes(q Querier) *http.ServeMux {
 		}
 		appx.JSON(w, 200, map[string]any{"funds": funds, "total_aum_kobo": total, "as_of": asOf})
 	})
+
+	// CDC freshness/lag surface (docs/CDC.md). Same 503 fail-closed gate
+	// as the data endpoints; the payload itself comes from the consumer's
+	// watermark file, never from Postgres.
+	mux.Handle("GET /v1/analytics/cdc-status", func() http.Handler {
+		h := cdcStatusHandler(appx.Env("CDC_WATERMARK_PATH", ""))
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !ready(w) {
+				return
+			}
+			h(w, r)
+		})
+	}())
 
 	return mux
 }

@@ -1,0 +1,39 @@
+PFAEngine Member is the self-service app for your Retirement Savings Account (RSA). Check your pension anytime — even on a slow connection.
+
+BALANCE & CONTRIBUTIONS
+• See your RSA balance and how it has grown, month by month.
+• Track employer and employee contributions as they land.
+• Make voluntary contributions (AVC/MPVC) and micro-pension top-ups.
+
+STATEMENTS YOU CAN TRUST
+• Generate and download RSA statements on demand.
+• Every statement carries a QR code so employers, banks and mortgage providers can verify it instantly.
+
+I-AM-ALIVE, WITHOUT THE QUEUE
+• Pensioners: complete periodic "I am alive" verification from home with a short selfie check — no branch visit, no paper forms.
+• Raw biometric images never leave the secure verification flow; only the liveness result is recorded.
+
+RETIREMENT & CLAIMS
+• Book retirement counselling sessions.
+• Start and track benefit, NSITF and death-benefit claims with document upload and status tracking.
+
+YOUR FAMILY, COVERED
+• Keep next-of-kin and beneficiary details up to date so your savings reach the right people.
+
+KNOW YOUR FUND
+• Compare fund performance (Fund I–IV, retiree funds) and see unit prices over time.
+• Plain-language guides on how the Contributory Pension Scheme works — in English, with more Nigerian languages on the way.
+
+BUILT FOR NIGERIAN NETWORKS
+• Works on low-end Android phones and unstable data: the app keeps your last-known balance and statements available offline and syncs when you're back online.
+• Light on data, light on storage.
+
+SECURE & REGULATED
+• Your account is operated by a PenCom-licensed Pension Fund Administrator.
+• Login with your RSA PIN; sensitive actions require step-up verification.
+• Data is encrypted in transit and handled in line with the Nigeria Data Protection Act (NDPA). We never sell your data.
+
+QUESTIONS?
+In-app support connects you to your PFA's member-care team.
+
+Note: PFAEngine is the technology platform; your retirement savings are held and administered by your licensed PFA under the regulation of the National Pension Commission (PenCom).
