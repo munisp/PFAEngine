@@ -484,3 +484,41 @@ next-generation engine:
    lakehouse staging sink; ML models for BR-07 analytics
 3. TigerBeetle cluster rollout once tbgate.Assess passes (AC-05) —
    Postgres ledger remains default until then
+
+## T21 — PenCom-parity regulatory surface (2026-11-17)
+Gap analysis vs pencom.gov.ng/pension-fund-administrators → 8 features
+implemented: forms library (9 seeded PenCom forms, versioned), KYC document
+uploads (6 kinds, opens KYC_REVIEW case, review resolves it), branch locator
++ slot-based appointment booking (no double-booking), fund performance
+publication (NAV series → compounded 3m/6m/12m/36m/YTD returns in bps),
+statutory disclosures (WORM, dup kind+period → 409), news/education CMS
+(draft→publish→archive, pinned feed), CRM relationship-manager field +
+AssignRM, tenancy licence profile (PRA s.60). 26 new member-svc routes, all
+documented in api/openapi.yaml (contract test passes). See
+docs/T21-REGULATORY-SURFACE.md.
+
+## T22 — Next-generation eKYC/KYB (2026-11-17)
+- ml/kyc_service: Python sidecar (fail-closed, every error → {"ok":false}):
+  PaddleOCR PP-OCRv5 + Docling document intelligence, regex-first field
+  extraction with ISO date normalisation, optional ollama VLM second pass
+  cross-validated against OCR text, YuNet+SFace face match (cosine ≥ 0.50,
+  Apache-2.0 — insightface buffalo_l excluded as non-commercial),
+  MiniFASNetV1SE+V2 dual-scale liveness ensemble. Weights vendored in
+  ml/kyc_service/weights/ (provenance in weights/README.md).
+  deploy/kyc-service.Dockerfile + compose service; member-svc wired via
+  KYC_SERVICE_URL.
+- internal/ekyc: fail-closed sidecar client + Ballerine-style verification
+  session state machine (DOCUMENT_CAPTURE→DOC_ANALYSIS→IDENTITY_CHECK→
+  BIOMETRIC→DECIDED), NIN/BVN cross-check via internal/kyc (tokenized,
+  cross-tenant duplicate detection), doc-vs-applicant field cross-checks,
+  risk-scored decision (AUTO_APPROVE / MANUAL_REVIEW→KYC_REVIEW case /
+  REJECT), staff override resolving the case. Unavailability alone never
+  rejects (fail-closed to human review).
+- internal/kyb: CAC RC + TIN validation, directors/UBO registry with the
+  25% beneficial-ownership rule, sanctions/PEP screening of every principal
+  via internal/aml, risk-scored VERIFIED/MANUAL_REVIEW/REJECTED with
+  casemgmt integration.
+- Routes: 9 eKYC + 4 KYB, all in api/openapi.yaml.
+- Verified: go test ./... all pass (7 ekyc + 7 kyb + 2 new e2e suites);
+  python unittest 11/11 for sidecar extraction logic; staff-portal build
+  clean (280KB). See docs/T22-EKYC-KYB.md.

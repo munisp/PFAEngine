@@ -41,11 +41,14 @@ func FromContext(ctx context.Context) (string, error) {
 
 // Registry provisions and manages tenants (BR-05: <1 day).
 type Registry struct {
-	mu      sync.Mutex
-	tenants map[string]*Tenant
+	mu       sync.Mutex
+	tenants  map[string]*Tenant
+	licenses map[string]LicenseProfile
 }
 
-func NewRegistry() *Registry { return &Registry{tenants: map[string]*Tenant{}} }
+func NewRegistry() *Registry {
+	return &Registry{tenants: map[string]*Tenant{}, licenses: map[string]LicenseProfile{}}
+}
 
 // Provision creates a tenant with schema, branding and flags — the entire
 // operation is synchronous configuration, measured in seconds (BR-05).
@@ -114,4 +117,65 @@ func (r *Registry) ResidencyAttestation(t *Tenant) map[string]string {
 		"tenant_id": t.ID, "deployment": t.Deployment, "hosting_region": region,
 		"jurisdiction": t.Jurisdiction, "framework": "NDPA 2023 / PenCom",
 	}
+}
+
+// ---- License profile (PRA s.60: PenCom operating licence) ------------------
+
+// LicenseStatus is the state of the operator's PenCom licence.
+type LicenseStatus string
+
+const (
+	LicenseActive    LicenseStatus = "ACTIVE"
+	LicenseSuspended LicenseStatus = "SUSPENDED"
+	LicenseRevoked   LicenseStatus = "REVOKED"
+)
+
+// LicenseProfile is the PRA s.60 operating-licence metadata PenCom
+// publishes for each licensed PFA.
+type LicenseProfile struct {
+	LicenseNo string        `json:"license_no"`
+	Class     string        `json:"class"` // PFA | PFC | CPFA
+	Status    LicenseStatus `json:"status"`
+	IssuedAt  string        `json:"issued_at"` // YYYY-MM-DD
+	ExpiresAt string        `json:"expires_at"`
+}
+
+// SetLicenseProfile records the PenCom licence profile for a tenant.
+func (r *Registry) SetLicenseProfile(tenantID string, lp LicenseProfile) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	t, ok := r.tenants[tenantID]
+	if !ok {
+		return ErrNoTenant
+	}
+	if lp.Class == "" {
+		lp.Class = "PFA"
+	}
+	if lp.Status == "" {
+		lp.Status = LicenseActive
+	}
+	if t.Branding == nil {
+		t.Branding = map[string]string{}
+	}
+	t.LicenseNo = lp.LicenseNo
+	// Licence profile rides on the tenant record; persist via fields below.
+	r.licenses[tenantID] = lp
+	return nil
+}
+
+// LicenseProfileOf returns the licence profile for a tenant. When none has
+// been recorded, a default ACTIVE PFA profile with the tenant's licence
+// number is returned.
+func (r *Registry) LicenseProfileOf(tenantID string) (LicenseProfile, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	lp, ok := r.licenses[tenantID]
+	if !ok {
+		t, found := r.tenants[tenantID]
+		if !found {
+			return LicenseProfile{}, false
+		}
+		return LicenseProfile{LicenseNo: t.LicenseNo, Class: "PFA", Status: LicenseActive}, true
+	}
+	return lp, true
 }

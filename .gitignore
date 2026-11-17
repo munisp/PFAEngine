@@ -6,3 +6,4 @@ ledger-core/target/
 node_modules/
 dist/
 /cmd/member-svc/member-svc
+__pycache__/

@@ -753,6 +753,190 @@ paths:
       summary: PenCom quarterly complaints register (from,to query dates)
       tags: [CRM]
       responses: { '200': { description: Register } }
+  /v1/ekyc/sessions:
+    post:
+      summary: Start an eKYC verification session
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+    get:
+      summary: List eKYC sessions (filter — state)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}:
+    get:
+      summary: Get an eKYC session
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/document:
+    post:
+      summary: Submit identity document (runs OCR + field extraction)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/identity:
+    post:
+      summary: Cross-check NIN/BVN against the document
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/biometric:
+    post:
+      summary: Submit selfie frames (liveness + face match)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/decide:
+    post:
+      summary: Reach risk-scored decision (AUTO_APPROVE/MANUAL_REVIEW/REJECT)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/sessions/{id}/override:
+    post:
+      summary: Staff override of a manual-review session
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/ekyc/health:
+    get:
+      summary: kyc-service sidecar health (fail-closed)
+      tags: [EKYC]
+      responses: { '200': { description: OK } }
+  /v1/kyb/businesses:
+    post:
+      summary: Submit business for KYB verification (RC, TIN, directors, UBOs)
+      tags: [KYB]
+      responses: { '200': { description: OK } }
+    get:
+      summary: List KYB businesses (filter — status)
+      tags: [KYB]
+      responses: { '200': { description: OK } }
+  /v1/kyb/businesses/{id}:
+    get:
+      summary: Get a KYB business
+      tags: [KYB]
+      responses: { '200': { description: OK } }
+  /v1/kyb/businesses/{id}/review:
+    post:
+      summary: Staff review of a manual-review business
+      tags: [KYB]
+      responses: { '200': { description: OK } }
+  /v1/forms:
+    get:
+      summary: List published forms (filter — category)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/forms/publish:
+    post:
+      summary: Publish a form version (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/forms/versions:
+    get:
+      summary: List versions of a form code
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/forms/{id}:
+    get:
+      summary: Get a published form
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/documents:
+    post:
+      summary: Submit a KYC document
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/documents/mine:
+    get:
+      summary: List a member's documents
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/documents/pending:
+    get:
+      summary: "Staff: documents pending review"
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/documents/{id}/review:
+    post:
+      summary: "Staff: approve/reject a document"
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/branches:
+    get:
+      summary: List branches (filter — state)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Add a branch (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/branches/{id}/availability:
+    get:
+      summary: Available appointment slots for a date
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/appointments:
+    post:
+      summary: Book a branch appointment
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+    get:
+      summary: List appointments (filters — member_id,branch_id,date)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/appointments/{id}/transition:
+    post:
+      summary: Transition an appointment (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/disclosures:
+    get:
+      summary: List statutory disclosures (filter — kind)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Publish a statutory disclosure (staff, WORM)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/news:
+    get:
+      summary: Published news/education feed (filter — category)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+    post:
+      summary: Create a news article (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/news/drafts:
+    get:
+      summary: "Staff: draft articles"
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/news/{id}/publish:
+    post:
+      summary: Publish an article (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/news/{id}/archive:
+    post:
+      summary: Archive an article (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/funds/{id}/nav/series:
+    get:
+      summary: Fund NAV time series
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/funds/performance:
+    get:
+      summary: Fund performance (all funds or fund_id, 3m/6m/12m/36m/YTD bps)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+  /v1/tenancy/license:
+    get:
+      summary: Tenant PenCom licence profile (PRA s.60)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+    put:
+      summary: Update tenant licence profile (staff)
+      tags: [Regulatory]
+      responses: { '200': { description: OK } }
+
 components:
   securitySchemes:
     tenantHeader:

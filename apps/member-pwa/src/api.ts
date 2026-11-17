@@ -198,6 +198,62 @@ export class Api {
   rateCase(caseId: string, score: number) {
     return this.req<MemberCase>('POST', `/api/v1/cases/${encodeURIComponent(caseId)}/csat`, { score });
   }
+
+  // ---- Tranche 21: forms, documents, branches, news, disclosures, funds, eKYC ----
+  formsList(category?: string) {
+    const q = category ? `?category=${encodeURIComponent(category)}` : '';
+    return this.req<{ forms: PfaForm[] }>('GET', `/api/v1/forms${q}`);
+  }
+  myDocuments(memberId: string) {
+    return this.req<{ documents: MemberDoc[] }>('GET', `/api/v1/documents/mine?member_id=${encodeURIComponent(memberId)}`);
+  }
+  submitDocument(input: SubmitDocumentRequest) {
+    return this.req<MemberDoc>('POST', '/api/v1/documents', input);
+  }
+  branchesList(state?: string) {
+    const q = state ? `?state=${encodeURIComponent(state)}` : '';
+    return this.req<{ branches: Branch[] }>('GET', `/api/v1/branches${q}`);
+  }
+  branchAvailability(branchId: string, date: string) {
+    return this.req<{ slots: number[] }>(
+      'GET',
+      `/api/v1/branches/${encodeURIComponent(branchId)}/availability?date=${encodeURIComponent(date)}`,
+    );
+  }
+  bookAppointment(input: BookAppointmentRequest) {
+    return this.req<Appointment>('POST', '/api/v1/appointments', input);
+  }
+  myAppointments(memberId: string) {
+    return this.req<{ appointments: Appointment[] }>('GET', `/api/v1/appointments?member_id=${encodeURIComponent(memberId)}`);
+  }
+  newsFeed(category?: string) {
+    const q = category ? `?category=${encodeURIComponent(category)}` : '';
+    return this.req<{ articles: Article[] }>('GET', `/api/v1/news${q}`);
+  }
+  disclosuresList() {
+    return this.req<{ disclosures: Disclosure[] }>('GET', '/api/v1/disclosures');
+  }
+  fundPerformance() {
+    return this.req<{ performance: Record<string, FundPerf> }>('GET', '/api/v1/funds/performance');
+  }
+  ekycStart(memberId: string) {
+    return this.req<EkycSession>('POST', '/api/v1/ekyc/sessions', { member_id: memberId });
+  }
+  ekycGet(id: string) {
+    return this.req<EkycSession>('GET', `/api/v1/ekyc/sessions/${encodeURIComponent(id)}`);
+  }
+  ekycSubmitDocument(id: string, input: EkycDocumentSubmission) {
+    return this.req<EkycSession>('POST', `/api/v1/ekyc/sessions/${encodeURIComponent(id)}/document`, input);
+  }
+  ekycVerifyIdentity(id: string, input: EkycIdentityVerification) {
+    return this.req<EkycSession>('POST', `/api/v1/ekyc/sessions/${encodeURIComponent(id)}/identity`, input);
+  }
+  ekycSubmitBiometric(id: string, frames: string[]) {
+    return this.req<EkycSession>('POST', `/api/v1/ekyc/sessions/${encodeURIComponent(id)}/biometric`, { frames });
+  }
+  ekycDecide(id: string) {
+    return this.req<EkycSession>('POST', `/api/v1/ekyc/sessions/${encodeURIComponent(id)}/decide`);
+  }
 }
 
 export interface MemberCase {
@@ -299,4 +355,159 @@ export interface DiasporaContribution {
   rsa_id: string;
   currency: string;
   credited_kobo: number;
+}
+
+// ---- Tranche 21 types (member-svc handler contracts) ----
+
+/** PfaForm is a published, downloadable member form (named PfaForm to avoid
+    clashing with DOM naming habits; wire name is "Form"). */
+export interface PfaForm {
+  id: string;
+  code: string;
+  title: string;
+  category: string;
+  version: string;
+  description: string;
+  ref: string;
+  sha256: string;
+  active: boolean;
+  published_at: string;
+}
+
+export type DocKind =
+  | 'PASSPORT_PHOTO'
+  | 'NIN_SLIP'
+  | 'ID_CARD'
+  | 'PROOF_OF_ADDRESS'
+  | 'BIRTH_CERTIFICATE'
+  | 'EMPLOYMENT_LETTER';
+
+export type MemberDocStatus = 'SUBMITTED' | 'UNDER_REVIEW' | 'APPROVED' | 'REJECTED';
+
+export interface MemberDoc {
+  id: string;
+  member_id: string;
+  kind: string;
+  filename: string;
+  mime: string;
+  size: number;
+  ref: string;
+  sha256: string;
+  status: MemberDocStatus;
+  review_note: string;
+  submitted_at: string;
+}
+
+export interface SubmitDocumentRequest {
+  member_id: string;
+  kind: DocKind;
+  filename: string;
+  mime: string;
+  size: number;
+  ref: string;
+  sha256: string;
+}
+
+export interface Branch {
+  id: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  phone: string;
+  email: string;
+  open_hours: string;
+  slot_minutes: number;
+  slots_per_day: number;
+  active: boolean;
+}
+
+export type AppointmentStatus = 'BOOKED' | 'CHECKED_IN' | 'DONE' | 'CANCELLED' | 'NO_SHOW';
+
+export interface Appointment {
+  id: string;
+  branch_id: string;
+  member_id: string;
+  date: string;
+  slot: number;
+  purpose: string;
+  status: AppointmentStatus;
+  booked_at: string;
+}
+
+export interface BookAppointmentRequest {
+  branch_id: string;
+  member_id: string;
+  date: string;
+  slot: number;
+  purpose: string;
+}
+
+export type ArticleCategory = 'PENCOM_NOTICE' | 'INDUSTRY' | 'PRODUCT' | 'EDUCATION';
+
+export interface Article {
+  id: string;
+  title: string;
+  body: string;
+  category: ArticleCategory;
+  pinned: boolean;
+  published_at: string;
+}
+
+export interface Disclosure {
+  id: string;
+  kind: string;
+  title: string;
+  period: string;
+  ref: string;
+  sha256: string;
+  published_at: string;
+  published_by: string;
+}
+
+export interface FundPerf {
+  fund_id: string;
+  as_of: string;
+  unit_price_kobo: number;
+  return_3m_bps?: number;
+  return_6m_bps?: number;
+  return_12m_bps?: number;
+  return_36m_bps?: number;
+  ytd_bps?: number;
+}
+
+export type EkycDecision = '' | 'AUTO_APPROVE' | 'MANUAL_REVIEW' | 'REJECT';
+
+/** EkycSession is the eKYC pipeline state machine snapshot (named EkycSession
+    to avoid clashing with src/session.ts Session). */
+export interface EkycSession {
+  id: string;
+  state: string;
+  document: { kind: string; confidence: number; expired: boolean };
+  nin_verified: boolean;
+  bvn_verified: boolean;
+  liveness_score: number;
+  liveness_passed: boolean;
+  face_score: number;
+  face_matched: boolean;
+  risk_score: number;
+  risk_flags: string[];
+  decision: EkycDecision;
+  case_id: string;
+  created_at: string;
+}
+
+export interface EkycDocumentSubmission {
+  kind: string;
+  ref: string;
+  image_b64: string;
+  use_vlm: boolean;
+}
+
+export interface EkycIdentityVerification {
+  nin: string;
+  bvn?: string;
+  name: string;
+  dob: string;
+  phone: string;
 }

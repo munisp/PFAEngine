@@ -148,3 +148,27 @@ func (r *Registry) Holdings(rsaID string) []Holding {
 }
 
 func Today() string { return time.Now().UTC().Format("2006-01-02") }
+
+// FundIDs returns the registered fund IDs in stable order.
+func (r *Registry) FundIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, 0, len(r.funds))
+	for id := range r.funds {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// SeedStandard registers the six PenCom multi-fund RSA funds for a tenant.
+func (r *Registry) SeedStandard(tenantID string) {
+	names := map[string]string{
+		FundI: "RSA Fund I (Aggressive)", FundII: "RSA Fund II (Default ≤49)",
+		FundIII: "RSA Fund III (Default 50+)", FundIV: "RSA Fund IV (Retiree)",
+		FundV: "Fund V (Micro Pension)", FundVI: "Fund VI (Non-Interest)",
+	}
+	for id, name := range names {
+		r.Register(Fund{ID: id, TenantID: tenantID, Name: name, Currency: "NGN"})
+	}
+}

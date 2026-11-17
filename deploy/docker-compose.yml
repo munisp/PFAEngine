@@ -178,11 +178,28 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8094/healthz"]
   member-svc:
     build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: member-svc } }
+    environment:
+      KYC_SERVICE_URL: http://kyc-service:8105
+      OLLAMA_URL: http://ollama:11434
     ports: ["8096:8096"]
-    depends_on: [postgres]
+    depends_on: [postgres, kyc-service]
     healthcheck:
       <<: *app-healthcheck
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8096/healthz"]
+
+  # ---- Tranche 22: next-gen eKYC document intelligence + liveness ----
+  kyc-service:
+    build:
+      context: ..
+      dockerfile: deploy/kyc-service.Dockerfile
+    environment:
+      PORT: "8105"
+      # Optional VLM cross-validation pass (MiniCPM-V / Qwen2.5-VL on the
+      # shared ollama service). VLM-extracted digits are only accepted when
+      # they also appear in the PaddleOCR text (never trusted unverified).
+      OLLAMA_URL: http://ollama:11434
+      KYC_VLM_MODEL: minicpm-v4.6
+    ports: ["8105:8105"]
 
   # ---- Tranche 18: AI/ML stack ----
   ml-serve:

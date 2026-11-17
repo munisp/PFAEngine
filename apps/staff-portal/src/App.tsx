@@ -8,6 +8,11 @@ import Agents from './views/Agents';
 import Compliance from './views/Compliance';
 import Cases from './views/Cases';
 import CRM from './views/CRM';
+import KycOps from './views/KycOps';
+import DocReview from './views/DocReview';
+import Content from './views/Content';
+import Branches from './views/Branches';
+import Funds from './views/Funds';
 
 // Staff operations portal: reconciliation exceptions, claims maker-checker,
 // audit export (dual control) — the compliance cockpit (BR-09, FR-502).
@@ -17,7 +22,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [totp, setTotp] = useState('');
   const [token, setToken] = useState<string>();
-  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance' | 'cases' | 'crm'>('cases');
+  const [view, setView] = useState<'recon' | 'claims' | 'audit' | 'fraud' | 'agents' | 'compliance' | 'cases' | 'crm' | 'kycops' | 'docreview' | 'content' | 'branches' | 'fundsnav'>('cases');
   const [error, setError] = useState('');
 
   const api = new Api(import.meta.env.VITE_API_BASE ?? 'http://localhost:8080', tenantId, token);
@@ -57,6 +62,11 @@ export default function App() {
         <nav style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setView('cases')}>Cases</button>
           <button onClick={() => setView('crm')}>CRM</button>
+          <button onClick={() => setView('kycops')}>KYC/KYB</button>
+          <button onClick={() => setView('docreview')}>Documents</button>
+          <button onClick={() => setView('content')}>Content</button>
+          <button onClick={() => setView('branches')}>Branches</button>
+          <button onClick={() => setView('fundsnav')}>Funds</button>
           <button onClick={() => setView('recon')}>Reconciliation</button>
           <button onClick={() => setView('claims')}>Claims</button>
           <button onClick={() => setView('audit')}>Audit export</button>
@@ -67,6 +77,11 @@ export default function App() {
       </header>
       {view === 'cases' && <Cases api={api} />}
       {view === 'crm' && <CRM api={api} />}
+      {view === 'kycops' && <KycOps api={api} />}
+      {view === 'docreview' && <DocReview api={api} />}
+      {view === 'content' && <Content api={api} />}
+      {view === 'branches' && <Branches api={api} />}
+      {view === 'fundsnav' && <Funds api={api} />}
       {view === 'recon' && <ReconQueue api={api} />}
       {view === 'claims' && <ClaimsQueue api={api} />}
       {view === 'audit' && <AuditExport api={api} />}

@@ -94,12 +94,14 @@ type Member360 struct {
 	MemberID         string          `json:"member_id"`
 	Facts            MemberFacts     `json:"facts"`
 	Segments         []SegmentTag    `json:"segments"`
-	OpenCases        []casemgmt.Case `json:"open_cases"`
-	RecentCases      []casemgmt.Case `json:"recent_cases"`
-	Timeline         []Interaction   `json:"timeline"`
-	CSATAvg          float64         `json:"csat_avg"`
-	ComplaintsTotal  int             `json:"complaints_total"`
-	ComplaintsUpheld int             `json:"complaints_upheld"`
+	// RelationshipManager is the member's dedicated RM (T21).
+	RelationshipManager string `json:"relationship_manager,omitempty"`
+	OpenCases           []casemgmt.Case `json:"open_cases"`
+	RecentCases         []casemgmt.Case `json:"recent_cases"`
+	Timeline            []Interaction   `json:"timeline"`
+	CSATAvg             float64         `json:"csat_avg"`
+	ComplaintsTotal     int             `json:"complaints_total"`
+	ComplaintsUpheld    int             `json:"complaints_upheld"`
 }
 
 // Campaign is a targeted outbound communication to a segment.
@@ -143,6 +145,7 @@ type Engine struct {
 	mu           sync.Mutex
 	interactions map[string][]Interaction // tenantID|memberID -> timeline
 	campaigns    map[string]*Campaign
+	rm           map[string]string // tenantID|memberID -> relationship manager staff id (T21)
 	cseq, iseq   int
 	cases        CaseProvider
 	facts        FactsProvider
@@ -154,10 +157,29 @@ func New(cases CaseProvider, facts FactsProvider) *Engine {
 	return &Engine{
 		interactions: map[string][]Interaction{},
 		campaigns:    map[string]*Campaign{},
+		rm:           map[string]string{},
 		cases:        cases,
 		facts:        facts,
 		now:          time.Now,
 	}
+}
+
+// AssignRM sets the member's dedicated relationship manager.
+func (e *Engine) AssignRM(tenantID, memberID, rmID string) error {
+	if tenantID == "" || memberID == "" || rmID == "" {
+		return errors.New("crm: tenant, member and rm id required")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.rm[key(tenantID, memberID)] = rmID
+	return nil
+}
+
+// RM returns the member's relationship manager ("" when unassigned).
+func (e *Engine) RM(tenantID, memberID string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.rm[key(tenantID, memberID)]
 }
 
 func key(tenantID, memberID string) string { return tenantID + "|" + memberID }
@@ -280,6 +302,7 @@ func (e *Engine) Member360(tenantID, memberID string) (Member360, error) {
 	}
 	v.Facts = f
 	v.Segments = Segment(f, e.now())
+	v.RelationshipManager = e.RM(tenantID, memberID)
 	v.Timeline = e.Timeline(tenantID, memberID, 50)
 	return v, nil
 }

@@ -21,21 +21,29 @@ import (
 	"time"
 
 	"github.com/munisp/pfaengine/internal/agents"
+	"github.com/munisp/pfaengine/internal/aml"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
+	"github.com/munisp/pfaengine/internal/branch"
 	"github.com/munisp/pfaengine/internal/casemgmt"
 	"github.com/munisp/pfaengine/internal/claimsfast"
 	"github.com/munisp/pfaengine/internal/contribution"
 	"github.com/munisp/pfaengine/internal/crm"
 	"github.com/munisp/pfaengine/internal/diaspora"
+	"github.com/munisp/pfaengine/internal/disclosure"
+	"github.com/munisp/pfaengine/internal/docslib"
+	"github.com/munisp/pfaengine/internal/docupload"
+	"github.com/munisp/pfaengine/internal/ekyc"
 	"github.com/munisp/pfaengine/internal/embedded"
 	"github.com/munisp/pfaengine/internal/escalation"
 	"github.com/munisp/pfaengine/internal/esg"
 	"github.com/munisp/pfaengine/internal/fraud"
+	"github.com/munisp/pfaengine/internal/funds"
 	"github.com/munisp/pfaengine/internal/glidepath"
 	"github.com/munisp/pfaengine/internal/httpsrv"
 	"github.com/munisp/pfaengine/internal/i18n"
 	"github.com/munisp/pfaengine/internal/invmandate"
+	"github.com/munisp/pfaengine/internal/kyb"
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/literacy"
@@ -45,6 +53,7 @@ import (
 	"github.com/munisp/pfaengine/internal/money"
 	"github.com/munisp/pfaengine/internal/mortgage"
 	"github.com/munisp/pfaengine/internal/mpg"
+	"github.com/munisp/pfaengine/internal/news"
 	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/pencare"
 	"github.com/munisp/pfaengine/internal/prefs"
@@ -56,6 +65,7 @@ import (
 	"github.com/munisp/pfaengine/internal/statement"
 	"github.com/munisp/pfaengine/internal/store"
 	"github.com/munisp/pfaengine/internal/succession"
+	"github.com/munisp/pfaengine/internal/tenancy"
 )
 
 // deps bundles the domain stores the handlers operate on.
@@ -119,6 +129,21 @@ type deps struct {
 	cases    *casemgmt.Engine
 	crm      *crm.Engine
 	caseRepo *store.CaseRepo
+	// Tranche 21: PenCom-parity regulatory surface.
+	docslib    *docslib.Library
+	docupload  *docupload.Engine
+	branch     *branch.Engine
+	disclosure *disclosure.Registry
+	news       *news.Engine
+	funds      *funds.Registry
+	tenants    *tenancy.Registry
+	// Tranche 22: next-generation eKYC/KYB. ekycIntel is the fail-closed
+	// client for the kyc-service sidecar (KYC_SERVICE_URL; nil-safe when
+	// unset — sessions then route to manual review).
+	ekyc      *ekyc.Engine
+	ekycIntel ekyc.DocIntel
+	kyb       *kyb.Engine
+	aml       *aml.Service
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -206,6 +231,42 @@ func main() {
 		caseRepo:       caseRepo,
 	}
 	d.crm = crm.New(caseEngine, d.memberFacts)
+
+	// Tranche 21 wiring: regulatory surface engines.
+	d.docslib = docslib.New()
+	for _, t := range strings.Split(httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo")), ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			d.docslib.SeedStandard(t)
+		}
+	}
+	d.docupload = docupload.New(caseEngine)
+	d.branch = branch.New()
+	d.disclosure = disclosure.New()
+	d.news = news.New()
+	d.funds = funds.NewRegistry()
+	for _, t := range strings.Split(httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo")), ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			d.funds.SeedStandard(t)
+		}
+	}
+	d.tenants = tenancy.NewRegistry()
+	if _, err := d.tenants.Provision(tenancy.Tenant{
+		ID: httpsrv.Getenv("DEFAULT_TENANT", "demo"), Name: httpsrv.Getenv("TENANT_NAME", "PFAEngine Demo PFA"),
+		LicenseNo: httpsrv.Getenv("PENCOM_LICENSE_NO", "PFA-0000"),
+	}); err != nil {
+		log.Printf("member-svc: default tenant provision: %v", err)
+	}
+
+	// Tranche 22 wiring: eKYC sidecar client (fail-closed) + engines.
+	if u := httpsrv.Getenv("KYC_SERVICE_URL", ""); u != "" {
+		d.ekycIntel = ekyc.NewClient(u)
+	} else {
+		d.ekycIntel = ekyc.NewClient("") // disabled; sessions route to manual review
+		log.Printf("member-svc: KYC_SERVICE_URL unset — eKYC sessions will route to manual review (fail-closed)")
+	}
+	d.aml = aml.NewService()
+	d.ekyc = ekyc.New(d.ekycIntel, d.kyc, caseEngine)
+	d.kyb = kyb.New(d.aml, caseEngine)
 	// Rehydrate persisted cases for configured tenants (boot warm-up).
 	// CASEMGMT_TENANTS is a comma-separated tenant list; defaults to the
 	// DEFAULT_TENANT (or "demo").
@@ -360,6 +421,47 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/crm/campaigns", func(d *deps) http.HandlerFunc { return d.crmCampaigns }},
 	{"POST", "/api/v1/crm/campaigns/{id}/launch", func(d *deps) http.HandlerFunc { return d.crmLaunchCampaign }},
 	{"GET", "/api/v1/crm/complaints/register", func(d *deps) http.HandlerFunc { return d.crmComplaintsRegister }},
+	// Tranche 21: PenCom-parity regulatory surface
+	{"GET", "/api/v1/forms", func(d *deps) http.HandlerFunc { return d.formsList }},
+	{"POST", "/api/v1/forms/publish", func(d *deps) http.HandlerFunc { return d.formPublish }},
+	{"GET", "/api/v1/forms/versions", func(d *deps) http.HandlerFunc { return d.formVersions }},
+	{"GET", "/api/v1/forms/{id}", func(d *deps) http.HandlerFunc { return d.formGet }},
+	{"POST", "/api/v1/documents", func(d *deps) http.HandlerFunc { return d.docSubmit }},
+	{"GET", "/api/v1/documents/mine", func(d *deps) http.HandlerFunc { return d.docMine }},
+	{"GET", "/api/v1/documents/pending", func(d *deps) http.HandlerFunc { return d.docPending }},
+	{"POST", "/api/v1/documents/{id}/review", func(d *deps) http.HandlerFunc { return d.docReview }},
+	{"GET", "/api/v1/branches", func(d *deps) http.HandlerFunc { return d.branchList }},
+	{"POST", "/api/v1/branches", func(d *deps) http.HandlerFunc { return d.branchAdd }},
+	{"GET", "/api/v1/branches/{id}/availability", func(d *deps) http.HandlerFunc { return d.branchAvailability }},
+	{"POST", "/api/v1/appointments", func(d *deps) http.HandlerFunc { return d.apptBook }},
+	{"GET", "/api/v1/appointments", func(d *deps) http.HandlerFunc { return d.apptList }},
+	{"POST", "/api/v1/appointments/{id}/transition", func(d *deps) http.HandlerFunc { return d.apptTransition }},
+	{"GET", "/api/v1/disclosures", func(d *deps) http.HandlerFunc { return d.disclosureList }},
+	{"POST", "/api/v1/disclosures", func(d *deps) http.HandlerFunc { return d.disclosurePublish }},
+	{"GET", "/api/v1/news", func(d *deps) http.HandlerFunc { return d.newsFeed }},
+	{"GET", "/api/v1/news/drafts", func(d *deps) http.HandlerFunc { return d.newsDrafts }},
+	{"POST", "/api/v1/news", func(d *deps) http.HandlerFunc { return d.newsCreate }},
+	{"POST", "/api/v1/news/{id}/publish", func(d *deps) http.HandlerFunc { return d.newsPublish }},
+	{"POST", "/api/v1/news/{id}/archive", func(d *deps) http.HandlerFunc { return d.newsArchive }},
+	{"POST", "/api/v1/funds/{id}/nav", func(d *deps) http.HandlerFunc { return d.fundPublishNAV }},
+	{"GET", "/api/v1/funds/{id}/nav/series", func(d *deps) http.HandlerFunc { return d.fundSeries }},
+	{"GET", "/api/v1/funds/performance", func(d *deps) http.HandlerFunc { return d.fundPerformance }},
+	{"GET", "/api/v1/tenancy/license", func(d *deps) http.HandlerFunc { return d.licenseGet }},
+	{"PUT", "/api/v1/tenancy/license", func(d *deps) http.HandlerFunc { return d.licenseSet }},
+	// Tranche 22: next-generation eKYC/KYB
+	{"POST", "/api/v1/ekyc/sessions", func(d *deps) http.HandlerFunc { return d.ekycStart }},
+	{"GET", "/api/v1/ekyc/sessions", func(d *deps) http.HandlerFunc { return d.ekycList }},
+	{"GET", "/api/v1/ekyc/sessions/{id}", func(d *deps) http.HandlerFunc { return d.ekycGet }},
+	{"POST", "/api/v1/ekyc/sessions/{id}/document", func(d *deps) http.HandlerFunc { return d.ekycSubmitDocument }},
+	{"POST", "/api/v1/ekyc/sessions/{id}/identity", func(d *deps) http.HandlerFunc { return d.ekycVerifyIdentity }},
+	{"POST", "/api/v1/ekyc/sessions/{id}/biometric", func(d *deps) http.HandlerFunc { return d.ekycSubmitBiometric }},
+	{"POST", "/api/v1/ekyc/sessions/{id}/decide", func(d *deps) http.HandlerFunc { return d.ekycDecide }},
+	{"POST", "/api/v1/ekyc/sessions/{id}/override", func(d *deps) http.HandlerFunc { return d.ekycOverride }},
+	{"GET", "/api/v1/ekyc/health", func(d *deps) http.HandlerFunc { return d.ekycHealth }},
+	{"POST", "/api/v1/kyb/businesses", func(d *deps) http.HandlerFunc { return d.kybSubmit }},
+	{"GET", "/api/v1/kyb/businesses", func(d *deps) http.HandlerFunc { return d.kybList }},
+	{"GET", "/api/v1/kyb/businesses/{id}", func(d *deps) http.HandlerFunc { return d.kybGet }},
+	{"POST", "/api/v1/kyb/businesses/{id}/review", func(d *deps) http.HandlerFunc { return d.kybReview }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for

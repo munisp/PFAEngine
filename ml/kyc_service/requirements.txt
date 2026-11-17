@@ -1,0 +1,10 @@
+# KYC/KYB document-intelligence + liveness service (Tranche 22).
+# Heavy deps install on CPU: paddlepaddle pulls ~200MB of wheels; docling
+# pulls torch. Models download on first use — prewarm via Dockerfile.
+paddlepaddle==3.3.0
+paddleocr>=3.0,<4.0
+docling>=2.40
+onnxruntime>=1.19
+opencv-python-headless>=4.10
+numpy>=1.26
+pillow>=10.0

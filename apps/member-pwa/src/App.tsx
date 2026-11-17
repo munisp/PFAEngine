@@ -6,19 +6,25 @@ import type { Session } from './session'
 import { clearSession, loadSession, saveSession } from './session'
 import { applyTheme, DEFAULT_THEME, loadTheme } from './theme'
 import Alive from './views/Alive'
+import Bookings from './views/Bookings'
 import Claims from './views/Claims'
 import Dashboard from './views/Dashboard'
 import Family from './views/Family'
+import Forms from './views/Forms'
 import Funds from './views/Funds'
 import Grow from './views/Grow'
 import Home from './views/Home'
+import Kyc from './views/Kyc'
 import Learn from './views/Learn'
 import Login from './views/Login'
+import News from './views/News'
+import Performance from './views/Performance'
 import Statement from './views/Statement'
 import Support from './views/Support'
 
 type View = 'dashboard' | 'grow' | 'funds' | 'family' | 'more'
   | 'statement' | 'alive' | 'claims' | 'home' | 'learn' | 'support'
+  | 'kyc' | 'forms' | 'news' | 'bookings' | 'performance'
 
 const LOCALE_KEY = 'pfa.locale'
 
@@ -63,11 +69,16 @@ export default function App() {
   ]
 
   const moreItems: { id: View; key: string }[] = [
+    { id: 'kyc', key: 'nav.kyc' },
     { id: 'statement', key: 'nav.statement' },
     { id: 'alive', key: 'nav.alive' },
     { id: 'claims', key: 'nav.claims' },
     { id: 'home', key: 'nav.home' },
     { id: 'learn', key: 'nav.learn' },
+    { id: 'forms', key: 'nav.forms' },
+    { id: 'news', key: 'nav.news' },
+    { id: 'bookings', key: 'nav.bookings' },
+    { id: 'performance', key: 'nav.performance' },
     { id: 'support', key: 'nav.support' },
   ]
 
@@ -105,6 +116,11 @@ export default function App() {
           {view === 'home' && <Home api={api} session={session} locale={locale} />}
           {view === 'learn' && <Learn api={api} session={session} locale={locale} />}
           {view === 'support' && <Support api={api} session={session} locale={locale} />}
+          {view === 'kyc' && <Kyc api={api} session={session} locale={locale} />}
+          {view === 'forms' && <Forms api={api} session={session} locale={locale} />}
+          {view === 'news' && <News api={api} session={session} locale={locale} />}
+          {view === 'bookings' && <Bookings api={api} session={session} locale={locale} />}
+          {view === 'performance' && <Performance api={api} session={session} locale={locale} />}
           {view === 'more' && (
             <main className="view">
               <h2>{t(locale, 'nav.more')}</h2>

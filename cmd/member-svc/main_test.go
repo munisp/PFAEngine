@@ -8,21 +8,31 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/munisp/pfaengine/internal/aml"
 	"github.com/munisp/pfaengine/internal/audit"
 	"github.com/munisp/pfaengine/internal/authn"
+	"github.com/munisp/pfaengine/internal/branch"
 	"github.com/munisp/pfaengine/internal/casemgmt"
 	"github.com/munisp/pfaengine/internal/crm"
+	"github.com/munisp/pfaengine/internal/disclosure"
+	"github.com/munisp/pfaengine/internal/docslib"
+	"github.com/munisp/pfaengine/internal/docupload"
+	"github.com/munisp/pfaengine/internal/ekyc"
 	"github.com/munisp/pfaengine/internal/fraud"
+	"github.com/munisp/pfaengine/internal/funds"
 	"github.com/munisp/pfaengine/internal/httpsrv"
+	"github.com/munisp/pfaengine/internal/kyb"
 	"github.com/munisp/pfaengine/internal/kyc"
 	"github.com/munisp/pfaengine/internal/ledger"
 	"github.com/munisp/pfaengine/internal/member"
 	"github.com/munisp/pfaengine/internal/micropension"
+	"github.com/munisp/pfaengine/internal/news"
 	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/retiree"
 	"github.com/munisp/pfaengine/internal/statement"
+	"github.com/munisp/pfaengine/internal/tenancy"
 )
 
 func newTestDeps() *deps {
@@ -43,7 +53,21 @@ func newTestDeps() *deps {
 		stmtSecret:  []byte("test-statement-secret"),
 		cases:       ce,
 		fraud:       fraud.NewEngine(),
+		docslib:     docslib.New(),
+		branch:      branch.New(),
+		disclosure:  disclosure.New(),
+		news:        news.New(),
+		funds:       funds.NewRegistry(),
+		tenants:     tenancy.NewRegistry(),
 	}
+	d.docslib.SeedStandard("t1")
+	d.funds.SeedStandard("t1")
+	d.tenants.Provision(tenancy.Tenant{ID: "t1", Name: "Test PFA", LicenseNo: "PFA-TEST"})
+	d.docupload = docupload.New(ce)
+	d.aml = aml.NewService()
+	d.ekycIntel = ekyc.NewClient("")
+	d.ekyc = ekyc.New(d.ekycIntel, d.kyc, ce)
+	d.kyb = kyb.New(d.aml, ce)
 	d.crm = crm.New(ce, d.memberFacts)
 	return d
 }

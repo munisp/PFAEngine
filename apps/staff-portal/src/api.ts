@@ -112,6 +112,66 @@ export class Api {
   crmComplaintsRegister(from: string, to: string) {
     return this.req<{ register: ComplaintRow[] }>('GET', `/api/v1/crm/complaints/register?from=${from}&to=${to}`);
   }
+
+  // ---- Tranche 21: documents, news CMS, disclosures, branches, NAV, eKYC/KYB ----
+  docsPending() { return this.req<{ documents: StaffDoc[] }>('GET', '/api/v1/documents/pending'); }
+  docReview(id: string, approve: boolean, note: string) {
+    return this.req<StaffDoc>('POST', `/api/v1/documents/${id}/review`, { approve, note });
+  }
+
+  newsDrafts() { return this.req<{ articles: Article[] }>('GET', '/api/v1/news/drafts'); }
+  newsFeed() { return this.req<{ articles: Article[] }>('GET', '/api/v1/news'); }
+  newsCreate(title: string, body: string, category: string, pinned: boolean) {
+    return this.req<Article>('POST', '/api/v1/news', { title, body, category, pinned });
+  }
+  newsPublish(id: string) { return this.req<Article>('POST', `/api/v1/news/${id}/publish`, {}); }
+  newsArchive(id: string) { return this.req<Article>('POST', `/api/v1/news/${id}/archive`, {}); }
+
+  disclosuresList() { return this.req<{ disclosures: Disclosure[] }>('GET', '/api/v1/disclosures'); }
+  disclosurePublish(kind: string, title: string, period: string, ref: string, sha256: string) {
+    return this.req<Disclosure>('POST', '/api/v1/disclosures', { kind, title, period, ref, sha256 });
+  }
+
+  branchesList() { return this.req<{ branches: Branch[] }>('GET', '/api/v1/branches'); }
+  branchAdd(body: BranchInput) { return this.req<Branch>('POST', '/api/v1/branches', body); }
+  appointmentsList(branchId?: string, date?: string) {
+    const p = new URLSearchParams();
+    if (branchId) p.set('branch_id', branchId);
+    if (date) p.set('date', date);
+    const s = p.toString();
+    return this.req<{ appointments: Appt[] }>('GET', '/api/v1/appointments' + (s ? `?${s}` : ''));
+  }
+  apptTransition(id: string, to: string) {
+    return this.req<Appt>('POST', `/api/v1/appointments/${id}/transition`, { to });
+  }
+
+  fundNavPublish(fundId: string, date: string, priceKobo: number) {
+    return this.req('POST', `/api/v1/funds/${fundId}/nav`, { date, price: priceKobo });
+  }
+  fundSeries(fundId: string) {
+    return this.req<{ series: NavPoint[] }>('GET', `/api/v1/funds/${fundId}/nav/series`);
+  }
+  fundPerformance() {
+    return this.req<{ performance: Record<string, FundPerf> }>('GET', '/api/v1/funds/performance');
+  }
+
+  ekycSessions(state?: string) {
+    return this.req<{ sessions: EkycSession[] }>('GET', '/api/v1/ekyc/sessions' + (state ? `?state=${state}` : ''));
+  }
+  ekycOverride(id: string, approve: boolean, note: string) {
+    return this.req<EkycSession>('POST', `/api/v1/ekyc/sessions/${id}/override`, { approve, note });
+  }
+  ekycHealth() {
+    return this.req<EkycHealth>('GET', '/api/v1/ekyc/health');
+  }
+
+  kybList(status?: string) {
+    return this.req<{ businesses: KybBiz[] }>('GET', '/api/v1/kyb/businesses' + (status ? `?status=${status}` : ''));
+  }
+  kybSubmit(body: KybInput) { return this.req<KybBiz>('POST', '/api/v1/kyb/businesses', body); }
+  kybReview(id: string, approve: boolean, note: string) {
+    return this.req<KybBiz>('POST', `/api/v1/kyb/businesses/${id}/review`, { approve, note });
+  }
 }
 
 export interface CaseComment { author: string; body: string; at: string }
@@ -150,6 +210,59 @@ export interface Campaign {
 export interface ComplaintRow {
   case_id: string; member_id: string; subject: string; received_at: string;
   resolved_at?: string; status: string; outcome?: string; days_to_resolve: number; csat?: number;
+}
+
+// ---- Tranche 21 interfaces ----
+export interface StaffDoc {
+  id: string; member_id: string; kind: string; filename: string; mime: string;
+  size: number; ref: string; sha256: string; status: string; submitted_at: string;
+}
+export interface Article {
+  id: string; title: string; body: string; category: string; status: string;
+  pinned: boolean; created_at: string; published_at?: string;
+}
+export interface Disclosure {
+  kind: string; title: string; period: string; ref: string; sha256: string; published_at: string;
+}
+export interface Branch {
+  id: string; name: string; address: string; city: string; state: string;
+  phone: string; email: string; open_hours: string; slot_minutes: number; slots_per_day: number;
+}
+export interface BranchInput {
+  name: string; address: string; city: string; state: string; phone: string;
+  email: string; open_hours: string; slot_minutes?: number; slots_per_day?: number;
+}
+export interface Appt {
+  id: string; branch_id: string; member_id: string; date: string; slot: string;
+  purpose: string; status: string; created_at: string;
+}
+export interface NavPoint { date: string; price_kobo: number }
+export interface FundPerf {
+  mtd_bps?: number; qtd_bps?: number; ytd_bps?: number; one_year_bps?: number;
+  inception_bps?: number; nav_kobo?: number; as_of?: string;
+}
+export interface EkycEvent { at: string; actor: string; action: string; detail?: string }
+export interface EkycSession {
+  id: string; member_id: string; state: string; decision: string; risk_score: number;
+  risk_flags: string[]; nin_verified: boolean; bvn_verified: boolean;
+  liveness_score: number; face_score: number; case_id?: string; created_at: string;
+  history: EkycEvent[];
+}
+export interface EkycHealth { ok: boolean; models_present?: Record<string, boolean>; error?: string }
+export interface KybPrincipal { name: string; dob: string; role?: string; ownership_pct?: number }
+export interface KybScreening { person_id: string; pep: boolean; sanction_hit: boolean }
+export interface KybBiz {
+  id: string; employer_id: string; name: string; rc_number: string; tin: string;
+  directors: KybPrincipal[]; ubos: KybPrincipal[]; doc_refs: string[];
+  screening: KybScreening[]; risk_score: number; risk_flags: string[];
+  status: 'PENDING' | 'VERIFIED' | 'MANUAL_REVIEW' | 'REJECTED';
+  case_id?: string; created_at: string;
+}
+export interface KybInput {
+  employer_id: string; name: string; rc_number: string; tin: string;
+  directors: { name: string; dob: string; role: string }[];
+  ubos: { name: string; dob: string; ownership_pct: number }[];
+  doc_refs: string[];
 }
 
 export const naira = (kobo: number) => (kobo / 100).toLocaleString('en-NG', { style: 'currency', currency: 'NGN' });
