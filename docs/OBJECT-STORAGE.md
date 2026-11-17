@@ -132,10 +132,13 @@ downgrading PII to a container filesystem.
 
 ## Honest caveats
 
-- **Body-size budget**: the shared `httpsrv.MaxBody(10<<20)` middleware caps
-  the *raw* request body; base64 inflates ~4/3, so the effective decoded-blob
-  cap through `POST /documents/upload` is ~7.5MB until that middleware budget
-  is raised (or uploads move to a direct-to-S3 presigned PUT flow).
+- **Body-size budget**: the shared `httpsrv.MaxBody(15<<20)` middleware caps
+  the *raw* request body at 15MB — the documented 10MB decoded-blob limit
+  plus headroom for the ~4/3 base64 inflation of the JSON upload envelope
+  (10MB decodes from ~13.3MB on the wire). The cap is enforced twice: an
+  up-front 413 on an over-limit `Content-Length`, and a streaming
+  `http.MaxBytesReader` truncation so a chunked or under-declared body cannot
+  bypass the limit (the over-read surfaces as a handler-side 400).
 - **JSON+base64 upload** is simple but memory-bound: the blob is buffered in
   member-svc for hashing before the Put. Fine at 10MB; a multipart or
   presigned-PUT flow would stream for larger artefacts.

@@ -58,11 +58,13 @@ import (
 	"github.com/munisp/pfaengine/internal/mpg"
 	"github.com/munisp/pfaengine/internal/news"
 	"github.com/munisp/pfaengine/internal/onboarding"
+	"github.com/munisp/pfaengine/internal/partners"
 	"github.com/munisp/pfaengine/internal/payroll"
 	"github.com/munisp/pfaengine/internal/pencare"
 	"github.com/munisp/pfaengine/internal/pencomrails"
 	"github.com/munisp/pfaengine/internal/persist"
 	"github.com/munisp/pfaengine/internal/prefs"
+	"github.com/munisp/pfaengine/internal/pricing"
 	"github.com/munisp/pfaengine/internal/readiness"
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/regfile"
@@ -112,18 +114,22 @@ type deps struct {
 	invmandateRepo *store.InvMandateRepo
 	// Tranche 17: 15-innovation engines (in-memory cores; persisted
 	// domains write through to innovateRepo when DATABASE_URL is set).
-	escalation   *escalation.Engine
-	roundup      *roundup.Engine
-	glidepath    *glidepath.Engine
-	literacy     *literacy.Engine
-	mortgage     *mortgage.Engine
-	claimsfast   *claimsfast.Engine
-	succession   *succession.Engine
-	fraud        *fraud.Engine
-	readiness    *readiness.Engine
-	diaspora     *diaspora.Engine
-	agents       *agents.Engine
-	embedded     *embedded.Engine
+	escalation *escalation.Engine
+	roundup    *roundup.Engine
+	glidepath  *glidepath.Engine
+	literacy   *literacy.Engine
+	mortgage   *mortgage.Engine
+	claimsfast *claimsfast.Engine
+	succession *succession.Engine
+	fraud      *fraud.Engine
+	readiness  *readiness.Engine
+	diaspora   *diaspora.Engine
+	agents     *agents.Engine
+	embedded   *embedded.Engine
+	// Gap 10: tenant-facing pricing catalog/plan assignment and the
+	// organizational partner network (banks/telcos/fintechs/aggregators).
+	pricing      *pricing.Engine
+	partners     *partners.Engine
 	regfile      *regfile.Engine
 	esg          *esg.Engine
 	innovateRepo *store.InnovateRepo
@@ -269,6 +275,8 @@ func main() {
 		diaspora:       diaspora.NewEngine(),
 		agents:         agents.NewEngine(),
 		embedded:       embedded.NewEngine(),
+		pricing:        pricing.NewEngine(),
+		partners:       partners.NewEngine(),
 		regfile:        regfile.NewEngine(),
 		esg:            esg.NewEngine(),
 		innovateRepo:   innovateRepo,
@@ -363,6 +371,8 @@ func main() {
 		d.tenants.AttachSink(snapRepo)
 		d.ekyc.AttachSink(snapRepo)
 		d.kyb.AttachSink(snapRepo)
+		d.pricing.AttachSink(snapRepo)
+		d.partners.AttachSink(snapRepo)
 		// Tranche-17 innovation engines (gap-5: no in-memory-only state).
 		d.roundup.AttachSink(snapRepo)
 		d.glidepath.AttachSink(snapRepo)
@@ -397,6 +407,7 @@ func main() {
 				"literacy": d.literacy.Restore, "claimsfast": d.claimsfast.Restore,
 				"readiness": d.readiness.Restore, "diaspora": d.diaspora.Restore,
 				"regfile": d.regfile.Restore, "esg": d.esg.Restore,
+				"pricing": d.pricing.Restore, "partners": d.partners.Restore,
 			} {
 				if err := restore(snaps); err != nil {
 					log.Printf("member-svc: restore %s/%s: %v", name, t, err)
@@ -644,9 +655,23 @@ var apiRoutes = []routeEntry{
 	{"POST", "/api/v1/pencom/transfers/{id}/confirm", func(d *deps) http.HandlerFunc { return d.pencomTransferConfirm }},
 	{"POST", "/api/v1/pencom/pssp/schedules", func(d *deps) http.HandlerFunc { return d.psspSubmit }},
 	{"GET", "/api/v1/pencom/pssp/schedules/{ref}", func(d *deps) http.HandlerFunc { return d.psspStatus }},
+	// Gap 10: pricing product surface + distribution partner network.
+	{"GET", "/api/v1/pricing/catalog", func(d *deps) http.HandlerFunc { return d.pricingCatalog }},
+	{"POST", "/api/v1/pricing/quote", func(d *deps) http.HandlerFunc { return d.pricingQuote }},
+	{"GET", "/api/v1/pricing/plan", func(d *deps) http.HandlerFunc { return d.pricingPlanGet }},
+	{"PUT", "/api/v1/pricing/plan", func(d *deps) http.HandlerFunc { return d.pricingPlanPut }},
+	{"POST", "/api/v1/partners", func(d *deps) http.HandlerFunc { return d.partnersOnboard }},
+	{"GET", "/api/v1/partners", func(d *deps) http.HandlerFunc { return d.partnersList }},
+	{"POST", "/api/v1/partners/{id}/approve", func(d *deps) http.HandlerFunc { return d.partnersApprove }},
+	{"POST", "/api/v1/partners/{id}/suspend", func(d *deps) http.HandlerFunc { return d.partnersSuspend }},
+	{"GET", "/api/v1/partners/{id}/settlement", func(d *deps) http.HandlerFunc { return d.partnersSettlement }},
+	{"POST", "/api/v1/partners/attribute", func(d *deps) http.HandlerFunc { return d.partnersAttribute }},
+	{"POST", "/api/v1/partners/accruals", func(d *deps) http.HandlerFunc { return d.partnersAccrue }},
 	// Geospatial: PostGIS KNN nearest-branch + state coverage.
 	{"GET", "/api/v1/geo/branches/nearest", func(d *deps) http.HandlerFunc { return d.geoBranchesNearest }},
 	{"GET", "/api/v1/geo/coverage", func(d *deps) http.HandlerFunc { return d.geoCoverage }},
+	// Channels: Africa's Talking USSD callback (INT-08, BR-09 parity; docs/USSD.md).
+	{"POST", "/api/v1/ussd/callback", func(d *deps) http.HandlerFunc { return d.ussdCallback }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for
@@ -671,7 +696,7 @@ func (d *deps) handler() http.Handler {
 	var h http.Handler = mux
 	h = httpsrv.Tenant(h)
 	h = httpsrv.OptionalAuth(d.authn)(h)
-	h = httpsrv.MaxBody(10 << 20)(h)
+	h = httpsrv.MaxBody(15 << 20)(h) // Gap-7: 10MB decoded upload cap + ~4/3 base64 inflation headroom (10MB decodes from ~13.3MB on the wire)
 	h = httpsrv.RateLimit(100, 200)(h)
 	h = httpsrv.SecurityHeaders(h)
 	return h

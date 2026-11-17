@@ -1,0 +1,38 @@
+[package]
+name = "storage-svc"
+version = "0.1.0"
+edition = "2021"
+description = "PFAEngine storage microservice: OpenDAL-backed object storage with HMAC presigned URLs"
+license = "Apache-2.0"
+
+[dependencies]
+# Pinned to the newest line whose MSRV (1.82) the sandbox toolchain (1.83)
+# satisfies; CI/Docker builds on newer toolchains may bump freely.
+opendal = { version = "0.54", default-features = false, features = ["services-fs", "services-memory"] }
+axum = "0.7"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Object-store backends beyond fs/memory are compile-time features so the
+# default binary stays lean (CGO-free, static, distroless-able).
+[features]
+default = []
+s3 = ["opendal/services-s3"]
+gcs = ["opendal/services-gcs"]
+azblob = ["opendal/services-azblob"]
+all-backends = ["s3", "gcs", "azblob"]
+
+[dev-dependencies]
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

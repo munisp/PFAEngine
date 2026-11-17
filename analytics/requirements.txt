@@ -5,3 +5,7 @@ pandas>=2.2
 # CDC consumer only (docs/CDC.md): pure-Python Kafka client, no librdkafka
 # — keeps the analytics image buildable without a C toolchain.
 kafka-python>=2.0.2
+# Optional lake storage via Apache OpenDAL (docs/OPENDAL.md): only used
+# when LAKE_URI is set (s3://bucket/lake, fs:///lake, memory://, ...).
+# Without LAKE_URI the lakehouse uses plain local FS and never imports it.
+opendal>=0.47

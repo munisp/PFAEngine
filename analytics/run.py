@@ -26,6 +26,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import lakeio
+
 log = logging.getLogger("analytics.run")
 
 HERE = Path(__file__).resolve().parent
@@ -89,8 +91,12 @@ def build_models(con, lake: str | Path,
     """Run silver then gold SQL (alphabetical = dependency order) against
     the bronze parquet lake. Returns the gold table names built.
     silver_only/gold_only restrict which model files run (incremental
-    mode); None means all (full refresh)."""
-    lake = str(Path(lake).resolve())
+    mode); None means all (full refresh).
+
+    DuckDB reads parquet from a local path, so in LAKE_URI mode the lake
+    must be fs-backed (lakeio.local_root raises a clear error otherwise);
+    extraction and CDC writes support every OpenDAL backend."""
+    lake = str(lakeio.open_lake(lake).local_root().resolve())
     for layer, mdir, only in (("silver", SILVER_DIR, silver_only),
                               ("gold", GOLD_DIR, gold_only)):
         for name, sql in _load_models(mdir, only):
@@ -115,6 +121,38 @@ def _table_name(sql: str) -> str:
 # ---- incremental (CDC) mode ----
 
 _STATE_FILE = "_incremental_state.json"
+_WM_REL = "bronze/cdc_watermark.json"
+
+
+def _wm_store(lake: str | Path):
+    """Where the CDC watermark lives: (lio, rel) inside the lake, or
+    (None, local Path) when CDC_WATERMARK_PATH overrides it (the override
+    is always a plain local file)."""
+    override = os.environ.get("CDC_WATERMARK_PATH", "")
+    if override:
+        return None, Path(override)
+    return lakeio.open_lake(lake), _WM_REL
+
+
+def _read_json(lio, rel) -> dict | None:
+    """Read a JSON document from a (lio, rel) or (None, Path) store."""
+    try:
+        if lio is None:
+            p = Path(rel)
+            return json.loads(p.read_text()) if p.exists() else None
+        return json.loads(lio.read_text(rel)) if lio.exists(rel) else None
+    except (ValueError, OSError):
+        return None
+
+
+def _write_json(lio, rel, doc: dict) -> None:
+    text = json.dumps(doc, indent=2)
+    if lio is None:
+        p = Path(rel)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    else:
+        lio.write_text(rel, text)
 
 
 def select_models(dirty_tables: set[str]) -> tuple[set[str], set[str]] | None:
@@ -138,9 +176,10 @@ def select_models(dirty_tables: set[str]) -> tuple[set[str], set[str]] | None:
     return silver, gold
 
 
-def _watermark_path(lake: str | Path) -> Path:
-    return Path(os.environ.get(
-        "CDC_WATERMARK_PATH", str(Path(lake) / "bronze" / "cdc_watermark.json")))
+def _watermark_path(lake: str | Path) -> str:
+    """Display string for logs/errors."""
+    override = os.environ.get("CDC_WATERMARK_PATH", "")
+    return override or f"{lake}/bronze/cdc_watermark.json"
 
 
 def dirty_tables_since_last_run(lake: str | Path) -> set[str] | None:
@@ -149,39 +188,28 @@ def dirty_tables_since_last_run(lake: str | Path) -> set[str] | None:
     None => CDC watermark unavailable (consumer never ran / file lost):
     the caller must fall back to a full rebuild. An empty set => fully
     caught up; the run is a no-op."""
-    wm_file = _watermark_path(lake)
-    if not wm_file.exists():
-        return None
-    try:
-        wm = json.loads(wm_file.read_text())
-    except (ValueError, OSError):
+    lio, wm_rel = _wm_store(lake)
+    wm = _read_json(lio, wm_rel)
+    if wm is None:
         return None
     tables = wm.get("tables", {})
-    state_file = Path(lake) / "bronze" / _STATE_FILE
-    seen: dict = {}
-    if state_file.exists():
-        try:
-            seen = json.loads(state_file.read_text()).get("tables", {})
-        except (ValueError, OSError):
-            seen = {}
+    # The run state file always lives in the lake (never the override).
+    state = _read_json(lakeio.open_lake(lake), f"bronze/{_STATE_FILE}") or {}
+    seen: dict = state.get("tables", {})
     return {t for t, meta in tables.items()
             if meta.get("last_seq", 0) > seen.get(t, -1)}
 
 
 def mark_incremental_run(lake: str | Path) -> None:
     """Snapshot the consumer watermark's per-table last_seq as processed."""
-    wm_file = _watermark_path(lake)
-    if not wm_file.exists():
+    lio, wm_rel = _wm_store(lake)
+    wm = _read_json(lio, wm_rel)
+    if wm is None:
         return
-    try:
-        tables = json.loads(wm_file.read_text()).get("tables", {})
-    except (ValueError, OSError):
-        return
+    tables = wm.get("tables", {})
     state = {"run_at": datetime.now(timezone.utc).isoformat(),
              "tables": {t: m.get("last_seq", 0) for t, m in tables.items()}}
-    state_file = Path(lake) / "bronze" / _STATE_FILE
-    state_file.parent.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(state, indent=2))
+    _write_json(lakeio.open_lake(lake), f"bronze/{_STATE_FILE}", state)
 
 
 def clear_cdc_partitions(lake: str | Path, tables: set[str]) -> int:
@@ -192,12 +220,12 @@ def clear_cdc_partitions(lake: str | Path, tables: set[str]) -> int:
     consumer re-seeds its compacted partition from the new extract
     partitions on the next event. Tables the extract failed on keep
     their CDC state (stale CDC beats an empty placeholder)."""
-    import shutil
+    lio = lakeio.open_lake(lake)
     removed = 0
     for t in tables:
-        cdir = Path(lake) / "bronze" / t / "dt=9999-12-31"
-        if cdir.is_dir():
-            shutil.rmtree(cdir)
+        crel = f"bronze/{t}/dt=9999-12-31"
+        if lio.dir_exists(crel):
+            lio.remove_dir(crel)
             removed += 1
             log.info("cleared CDC compacted partition for %s "
                      "(full extract is authoritative)", t)

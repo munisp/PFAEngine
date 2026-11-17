@@ -32,8 +32,10 @@ Postgres schema `analytics`  ──►  Grafana (provisioned dashboards)
 | `models/silver/*.sql` | Cleaned/typed conformed models: `members`, `contributions`, `employers`, `cases`, `funds_nav`, `kyc_sessions`. Each dedupes bronze partitions by primary key (`row_number() ... ORDER BY dt DESC`) so both incremental and full-refresh loads are correct. |
 | `models/gold/*.sql` | Business aggregates: `member_growth_daily`, `contribution_monthly_by_employer`, `fund_aum_daily`, `case_sla_compliance`, `kyc_funnel`, `employer_remittance_health`, `retirement_pipeline`. |
 | `run.py` | Orchestrator: extract → silver → gold → export gold to Postgres `analytics` schema (full refresh, one transaction per table — readers never see an empty window). |
+| `lakeio.py` | Lake I/O adapter: when `LAKE_URI` is set (e.g. `s3://bucket/lake`, `fs:///lake`, `memory://`, `gcs://…`, `azblob://…`) all bronze reads/writes go through Apache OpenDAL (`opendal` pip package); otherwise plain local FS — unchanged behaviour. Silver/gold DuckDB builds read parquet from a local path, so remote lakes need `fs://` for model builds. See docs/OPENDAL.md. |
 | `lakehouse_test.py` | Unit tests: fixture parquet lake → all silver+gold SQL in in-memory DuckDB; Postgres export guarded by `TEST_DATABASE_URL`. (`test_lakehouse.py` is only a discovery shim — unittest's default pattern is `test*.py`.) |
-| `requirements.txt` | duckdb, psycopg2-binary, pyarrow, pandas. |
+| `lakeio_test.py` | lakeio tests: memory:// and fs:// round-trips, CDC applier against an OpenDAL lake, local fallback unchanged. (`test_lakeio.py` shim.) |
+| `requirements.txt` | duckdb, psycopg2-binary, pyarrow, pandas, kafka-python, opendal (optional — only used when `LAKE_URI` is set). |
 
 ## Conventions
 

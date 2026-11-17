@@ -34,13 +34,13 @@ import json
 import logging
 import os
 import re
-import shutil
 import time
 from datetime import date
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.parquet as pq
+
+import lakeio
 
 log = logging.getLogger("analytics.extract")
 
@@ -152,30 +152,35 @@ def _table_from_cursor(cur, columns: list[str]) -> pa.Table:
         else pa.table({"__empty": pa.array([], type=pa.bool_())})
 
 
-def _read_watermark(tdir: Path) -> str | None:
-    f = tdir / "_watermark.json"
-    if f.exists():
+def _read_watermark(lio: lakeio.LakeIO, trel: str) -> str | None:
+    rel = f"{trel}/_watermark.json"
+    if lio.exists(rel):
         try:
-            return json.loads(f.read_text()).get("watermark")
+            return json.loads(lio.read_text(rel)).get("watermark")
         except (ValueError, OSError):
             return None
     return None
 
 
-def _write_watermark(tdir: Path, column: str, value: str) -> None:
-    (tdir / "_watermark.json").write_text(json.dumps(
+def _write_watermark(lio: lakeio.LakeIO, trel: str, column: str,
+                     value: str) -> None:
+    lio.write_text(f"{trel}/_watermark.json", json.dumps(
         {"watermark_column": column, "watermark": value}))
 
 
 def extract_table(conn, table: str, columns: list[str], lake: str | Path,
                   ds: str | None = None) -> dict:
     """Extract one table into lake/bronze/<table>/dt=<ds>/. Returns a
-    per-table result dict (never raises for data-level failures)."""
+    per-table result dict (never raises for data-level failures).
+
+    `lake` may be a local path or a lakeio.LakeIO handle (LAKE_URI mode —
+    see lakeio.py)."""
     if not _IDENT_RE.match(table):
         raise ValueError(f"unsafe table name: {table!r}")
     ds = ds or date.today().isoformat()
-    tdir = Path(lake) / "bronze" / table
-    pdir = tdir / f"dt={ds}"
+    lio = lakeio.open_lake(lake)
+    trel = f"bronze/{table}"
+    prel = f"{trel}/dt={ds}"
     wm_col = _watermark_col(columns)
     incremental = wm_col is not None and table not in FULL_REFRESH_TABLES
 
@@ -183,7 +188,7 @@ def extract_table(conn, table: str, columns: list[str], lake: str | Path,
     params: tuple = ()
     prev_wm = None
     if incremental:
-        prev_wm = _read_watermark(tdir)
+        prev_wm = _read_watermark(lio, trel)
         if prev_wm:
             sql += f" WHERE {wm_col} > %s"
             params = (prev_wm,)
@@ -192,38 +197,32 @@ def extract_table(conn, table: str, columns: list[str], lake: str | Path,
         cur.execute(sql, params)
         tbl = _table_from_cursor(cur, columns)
 
-    tdir.mkdir(parents=True, exist_ok=True)
     if incremental:
-        pdir.mkdir(parents=True, exist_ok=True)
-        part = pdir / f"part-{int(time.time() * 1000)}.parquet"
-        pq.write_table(tbl, part)
+        part = f"{prel}/part-{int(time.time() * 1000)}.parquet"
+        lio.write_parquet(tbl, part)
         if tbl.num_rows:
             import pyarrow.compute as pc
             col = tbl.column(wm_col) if wm_col in tbl.column_names else None
             if col is not None and col.null_count < len(col):
                 new_wm = str(pc.max(col).as_py())
-                _write_watermark(tdir, wm_col, new_wm)
+                _write_watermark(lio, trel, wm_col, new_wm)
         mode = "incremental"
     else:
         # Full refresh: replace the day's partition atomically-ish so a
         # same-day re-run is idempotent.
-        if pdir.exists():
-            shutil.rmtree(pdir)
-        pdir.mkdir(parents=True, exist_ok=True)
-        pq.write_table(tbl, pdir / "part-full.parquet")
+        lio.remove_dir(prel)
+        lio.write_parquet(tbl, f"{prel}/part-full.parquet")
         mode = "full"
     return {"table": table, "mode": mode, "rows": tbl.num_rows, "ds": ds}
 
 
-def _write_placeholder(lake: str | Path, table: str, ds: str) -> None:
+def _write_placeholder(lio: lakeio.LakeIO, table: str, ds: str) -> None:
     """Empty marker parquet so DuckDB globs for a failed table still match
     at least one file (union_by_name fills the missing columns as NULL)."""
-    pdir = Path(lake) / "bronze" / table / f"dt={ds}"
-    if any(Path(lake).glob(f"bronze/{table}/dt=*/*.parquet")):
+    if lio.glob(f"bronze/{table}/dt=*/*.parquet"):
         return  # earlier partitions exist — glob still works
-    pdir.mkdir(parents=True, exist_ok=True)
-    pq.write_table(pa.table({"__empty": pa.array([], type=pa.bool_())}),
-                   pdir / "part-empty.parquet")
+    lio.write_parquet(pa.table({"__empty": pa.array([], type=pa.bool_())}),
+                      f"bronze/{table}/dt={ds}/part-empty.parquet")
 
 
 def extract_all(dsn: str | None, lake: str | Path,
@@ -237,6 +236,7 @@ def extract_all(dsn: str | None, lake: str | Path,
     if not dsn:
         raise RuntimeError("extract_all: --dsn or DATABASE_URL required")
     ds = ds or date.today().isoformat()
+    lio = lakeio.open_lake(lake)
     tables = enumerate_tables(migrations_dir)
     manifest: dict = {"ds": ds, "source": "postgres", "tables": {}, "errors": {}}
 
@@ -244,7 +244,7 @@ def extract_all(dsn: str | None, lake: str | Path,
     try:
         for name, meta in sorted(tables.items()):
             try:
-                res = extract_table(conn, name, meta["columns"], lake, ds)
+                res = extract_table(conn, name, meta["columns"], lio, ds)
                 manifest["tables"][name] = res
                 log.info("bronze %-28s %-11s rows=%d",
                          name, res["mode"], res["rows"])
@@ -252,14 +252,13 @@ def extract_all(dsn: str | None, lake: str | Path,
                 conn.rollback()
                 log.warning("bronze %-28s FAILED: %s", name, exc)
                 manifest["errors"][name] = str(exc)
-                _write_placeholder(lake, name, ds)
+                _write_placeholder(lio, name, ds)
     finally:
         conn.close()
 
-    bdir = Path(lake) / "bronze"
-    bdir.mkdir(parents=True, exist_ok=True)
     manifest["ok"] = not manifest["errors"]
-    (bdir / "_manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    lio.write_text("bronze/_manifest.json",
+                   json.dumps(manifest, indent=2, default=str))
     return manifest
 
 

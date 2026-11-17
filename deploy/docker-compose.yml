@@ -215,11 +215,19 @@ services:
       S3_ACCESS_KEY: pfaengine
       S3_SECRET_KEY: pfaengine123
       S3_USE_SSL: "false"
+      # OpenDAL storage gateway (storage-svc) — when set, this is the PRIMARY
+      # blob backend (takes priority over direct S3 above; docs/OPENDAL.md):
+      STORAGE_SVC_URL: http://storage-svc:8110
+      STORAGE_SVC_TOKEN: ${STORAGE_SVC_TOKEN}
       # Gap 9 — challenge-response (active) liveness:
       # EKYC_REQUIRE_CHALLENGE=true  (fail-closed: passive /biometric rejected)
       # LIVENESS_THRESHOLD=0.60      (mean action score for PASSED)
       # SMILE_ID_PARTNER_ID / SMILE_ID_API_KEY enable the Smile ID SmartSelfie
       # provider (assumed endpoint spec — docs/LIVENESS.md).
+      # Channels — Africa's Talking USSD/SMS (POST /api/v1/ussd/callback; docs/USSD.md):
+      # AT_API_KEY / AT_USERNAME / AT_SHORT_CODE  (sandbox username is "sandbox";
+      # AT_BASE_URL=https://api.sandbox.africastalking.com for sandbox)
+      # I18N_DIR (default "i18n") supplies the en + pcm-NG canned USSD replies.
     ports: ["8096:8096"]
     depends_on: [postgres, kyc-service, minio]
     healthcheck:
@@ -335,6 +343,24 @@ services:
       - grafanadata:/var/lib/grafana
     depends_on: [postgres]
 
+  # ---- OpenDAL storage gateway (storage-svc/, docs/OPENDAL.md) ----
+  storage-svc:
+    build:
+      context: ./storage-svc          # multi-stage cargo build; FEATURES=s3 default
+      # args: { FEATURES: "s3" }      # or "s3,gcs,azblob" / "" for fs-only
+    environment:
+      LISTEN_ADDR: 0.0.0.0:8110
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-fs}    # fs|memory|s3 (s3 needs S3_* envs)
+      FS_ROOT: /var/lib/storage-svc
+      STORAGE_TOKEN: ${STORAGE_SVC_TOKEN:?set STORAGE_SVC_TOKEN in .env}
+      # STORAGE_PRESIGN_SECRET: ${STORAGE_PRESIGN_SECRET:-}  # default: STORAGE_TOKEN
+      # STORAGE_PUBLIC_URL: https://storage.example.com  # set if presigned URLs are redeemed from outside the compose network
+      # S3_BUCKET/S3_ENDPOINT/S3_REGION/S3_ACCESS_KEY/S3_SECRET_KEY when STORAGE_BACKEND=s3
+    volumes:
+      - storage-data:/var/lib/storage-svc        # only needed for fs backend
+    restart: unless-stopped
+    # healthcheck intentionally omitted: debian-slim has no curl/wget; endpoint is GET /healthz
+
   # ---- CDC: Debezium Postgres -> Kafka -> bronze parquet (docs/CDC.md) ----
   connect:
     # Debezium Connect (Kafka Connect + Postgres source connector).
@@ -382,3 +408,4 @@ volumes:
   ollamadata:
   lakedata:
   grafanadata:
+  storage-data:

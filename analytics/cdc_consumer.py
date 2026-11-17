@@ -54,7 +54,8 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.parquet as pq
+
+import lakeio
 
 log = logging.getLogger("analytics.cdc")
 
@@ -324,13 +325,16 @@ def _safe_cast(tbl: pa.Table, schema: pa.Schema) -> pa.Table:
 
 
 class BronzeStore:
-    """Reads/writes the per-table compacted CDC partition."""
+    """Reads/writes the per-table compacted CDC partition.
+
+    `lake` may be a local path or a lakeio.LakeIO handle (LAKE_URI mode);
+    all paths handled internally are lake-relative POSIX strings."""
 
     def __init__(self, lake: str | Path):
-        self.lake = Path(lake)
+        self.lio = lakeio.open_lake(lake)
 
-    def _cdc_part(self, table: str) -> Path:
-        return self.lake / "bronze" / table / CDC_PARTITION / "part-cdc.parquet"
+    def _cdc_part(self, table: str) -> str:
+        return f"bronze/{table}/{CDC_PARTITION}/part-cdc.parquet"
 
     def load_current(self, table: str, pk_cols: tuple[str, ...],
                      ) -> tuple[pa.Table | None, bool]:
@@ -339,9 +343,9 @@ class BronzeStore:
         Reads the compacted partition when present; otherwise merges all
         legacy extract partitions (seed) and reports seeded=True so the
         caller can supersede them after a successful write."""
-        f = self._cdc_part(table)
-        if f.exists():
-            return pq.read_table(f), False
+        rel = self._cdc_part(table)
+        if self.lio.exists(rel):
+            return self.lio.read_parquet(rel), False
         return self._seed_from_partitions(table, pk_cols), True
 
     def _seed_from_partitions(self, table: str,
@@ -350,22 +354,22 @@ class BronzeStore:
         state, deduping by PK with the latest dt= partition winning
         (mirrors the silver dedupe contract). Placeholder parquets from
         failed extracts (no PK columns) are skipped. None if no data."""
-        tdir = self.lake / "bronze" / table
-        files = sorted(p for p in tdir.glob("dt=*/*.parquet")
-                       if p.parent.name != CDC_PARTITION)
+        files = [f for f in self.lio.glob(f"bronze/{table}/dt=*/*.parquet")
+                 if f.split("/")[-2] != CDC_PARTITION]
+        files.sort()
         if not files:
             return None
         latest: dict[str, tuple[str, dict]] = {}
         schema: pa.Schema | None = None
         for f in files:
-            t = pq.read_table(f)
+            t = self.lio.read_parquet(f)
             if not any(c in t.column_names for c in pk_cols):
                 continue  # extract placeholder (failed table) — no data
             t = t.drop_columns([c for c in ("__empty",)
                                 if c in t.column_names])
             schema = t.schema if schema is None else pa.unify_schemas(
                 [schema, t.schema], promote_options="permissive")
-            dt = f.parent.name[3:]
+            dt = f.split("/")[-2][3:]
             for r in t.to_pylist():
                 k = _row_key(r, pk_cols)
                 if k not in latest or dt >= latest[k][0]:
@@ -374,26 +378,25 @@ class BronzeStore:
             return None
         return _rows_to_table([v[1] for v in latest.values()], schema)
 
-    def write_current(self, table: str, tbl: pa.Table) -> Path:
-        """Atomic-ish replace: write tmp then rename over the old part."""
-        f = self._cdc_part(table)
-        f.parent.mkdir(parents=True, exist_ok=True)
-        tmp = f.with_suffix(".parquet.tmp")
-        pq.write_table(tbl, tmp)
-        os.replace(tmp, f)
-        return f
+    def write_current(self, table: str, tbl: pa.Table) -> str:
+        """Atomic-ish replace: write tmp then rename over the old part.
+        (On object stores single-object PUT is atomic; lakeio.replace maps
+        to os.replace locally and rename/copy+delete remotely.)"""
+        final = self._cdc_part(table)
+        tmp = f"bronze/{table}/{CDC_PARTITION}/part-cdc.parquet.tmp"
+        self.lio.write_parquet(tbl, tmp)
+        self.lio.replace(tmp, final)
+        return final
 
     def remove_legacy_partitions(self, table: str) -> int:
         """Remove all non-CDC partitions of `table` (they are a strict
         subset of the just-written compacted partition). Returns the
         number of partition dirs removed."""
-        import shutil
-        tdir = self.lake / "bronze" / table
         removed = 0
-        for pdir in tdir.glob("dt=*"):
-            if pdir.name == CDC_PARTITION or not pdir.is_dir():
+        for name in self.lio.list_dirs(f"bronze/{table}"):
+            if not name.startswith("dt=") or name == CDC_PARTITION:
                 continue
-            shutil.rmtree(pdir)
+            self.lio.remove_dir(f"bronze/{table}/{name}")
             removed += 1
         if removed:
             log.info("cdc %-28s superseded %d legacy partition(s)",
@@ -409,26 +412,51 @@ class Watermark:
 
     `seq` is a global monotonically-increasing applied-event counter;
     run.py --incremental compares per-table last_seq against its own
-    state file to find dirty tables."""
+    state file to find dirty tables.
 
-    def __init__(self, path: str | Path):
-        self.path = Path(path)
+    Local mode (default): `path` is a plain filesystem path. Lake mode:
+    pass lio=lakeio.open_lake(lake) and `path` is lake-relative — the
+    watermark lives inside the lake next to the data it describes."""
+
+    def __init__(self, path: str | Path, lio: "lakeio.LakeIO | None" = None):
+        self.lio = lio
+        if lio is not None:
+            self.rel = str(path)
+            self.path = None
+        else:
+            self.path = Path(path)
+            self.rel = None
         self.data = {"version": 1, "seq": 0, "offsets": {}, "lsn": None,
                      "tables": {}, "updated_at": None}
         self.load()
 
     def load(self) -> None:
-        if self.path.exists():
-            try:
-                self.data.update(json.loads(self.path.read_text()))
-            except (ValueError, OSError) as exc:
-                log.warning("watermark unreadable (%s) — starting fresh", exc)
+        try:
+            if self.lio is not None:
+                raw = self.lio.read_text(self.rel) if self.lio.exists(self.rel) else None
+            else:
+                raw = self.path.read_text() if self.path.exists() else None
+        except (ValueError, OSError) as exc:
+            log.warning("watermark unreadable (%s) — starting fresh", exc)
+            return
+        if raw is None:
+            return
+        try:
+            self.data.update(json.loads(raw))
+        except ValueError as exc:
+            log.warning("watermark unreadable (%s) — starting fresh", exc)
 
     def save(self) -> None:
         self.data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        text = json.dumps(self.data, indent=2, default=str)
+        if self.lio is not None:
+            tmp = self.rel + ".tmp"
+            self.lio.write_text(tmp, text)
+            self.lio.replace(tmp, self.rel)
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.data, indent=2, default=str))
+        tmp.write_text(text)
         os.replace(tmp, self.path)
 
     def record(self, topic: str, partition: int, offset: int,
@@ -534,9 +562,13 @@ def run_consumer(brokers: str, lake: str | Path,
         return 2
 
     pk_map = parse_primary_keys(migrations_dir)
-    wm_path = watermark_path or os.environ.get(
-        "CDC_WATERMARK_PATH", str(Path(lake) / "bronze" / "cdc_watermark.json"))
-    wm = Watermark(wm_path)
+    wm_override = watermark_path or os.environ.get("CDC_WATERMARK_PATH", "")
+    if wm_override:
+        wm = Watermark(wm_override)  # explicit local override path
+    else:
+        # Default: the watermark lives in the lake itself — under LAKE_URI
+        # this keeps it next to the data on the OpenDAL backend.
+        wm = Watermark("bronze/cdc_watermark.json", lakeio.open_lake(lake))
     applier = CDCApplier(lake, pk_map, watermark=wm,
                          batch_size=batch_size, flush_seconds=flush_seconds)
 

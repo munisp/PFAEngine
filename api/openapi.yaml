@@ -890,6 +890,64 @@ paths:
       summary: "Geo: branch coverage per state"
       tags: [Geo]
       responses: { '200': { description: OK } }
+  /v1/ussd/callback:
+    post:
+      summary: "Africa's Talking USSD callback — form POST (sessionId, serviceCode, phoneNumber, text); text/plain body prefixed CON/END"
+      tags: [Channels]
+      responses: { '200': { description: "USSD menu (CON) or final reply (END), text/plain" } }
+  /v1/pricing/catalog:
+    get:
+      summary: "Pricing: tier catalog (STARTER/GROWTH/SCALE/ENTERPRISE)"
+      tags: [Pricing]
+      responses: { '200': { description: OK } }
+  /v1/pricing/quote:
+    post:
+      summary: "Pricing: deterministic quote (per-member + AUM bps + overage, kobo-exact)"
+      tags: [Pricing]
+      responses: { '200': { description: OK } }
+  /v1/pricing/plan:
+    get:
+      summary: "Pricing: current tenant plan assignment"
+      tags: [Pricing]
+      responses: { '200': { description: OK } }
+    put:
+      summary: "Pricing: assign tenant plan (staff, effective-dated)"
+      tags: [Pricing]
+      responses: { '200': { description: OK }, '403': { description: Staff only } }
+  /v1/partners:
+    post:
+      summary: "Partners: onboard distribution partner (staff)"
+      tags: [Partners]
+      responses: { '201': { description: Created }, '403': { description: Staff only } }
+    get:
+      summary: "Partners: list partners"
+      tags: [Partners]
+      responses: { '200': { description: OK } }
+  /v1/partners/{id}/approve:
+    post:
+      summary: "Partners: approve/reinstate (staff)"
+      tags: [Partners]
+      responses: { '200': { description: OK } }
+  /v1/partners/{id}/suspend:
+    post:
+      summary: "Partners: suspend (blocks accrual) (staff)"
+      tags: [Partners]
+      responses: { '200': { description: OK } }
+  /v1/partners/{id}/settlement:
+    get:
+      summary: "Partners: settlement report for a period (staff)"
+      tags: [Partners]
+      responses: { '200': { description: OK } }
+  /v1/partners/attribute:
+    post:
+      summary: "Partners: attribute member join to referral code (idempotent, first-write-wins)"
+      tags: [Partners]
+      responses: { '200': { description: OK } }
+  /v1/partners/accruals:
+    post:
+      summary: "Partners: accrue revenue share on a contribution (staff hook)"
+      tags: [Partners]
+      responses: { '200': { description: OK } }
   /v1/forms:
     get:
       summary: List published forms (filter — category)

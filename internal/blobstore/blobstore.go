@@ -3,8 +3,11 @@
 // Document metadata lives in internal/docupload; the bytes live here and
 // never pass through logs, snapshots or the audit trail.
 //
-// Two backends implement the Store contract:
+// Three backends implement the Store contract:
 //
+//   - opendalStore (PRIMARY, opendal.go): HTTP client for storage-svc,
+//     the platform's Apache OpenDAL microservice. Selected when
+//     STORAGE_SVC_URL is set; STORAGE_SVC_TOKEN is mandatory with it.
 //   - s3Store: any S3-compatible service (MinIO in dev, AWS S3 in
 //     production) via a minimal hand-rolled SigV4 signer — the repo keeps
 //     dependencies lean, so no aws-sdk is pulled in. Path-style addressing
@@ -133,18 +136,31 @@ var s3RequiredEnv = []string{"S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY", "S3_SE
 
 // FromEnv builds a Store from the environment.
 //
-//   - All of S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY set:
+// Priority:
+//
+//  1. STORAGE_SVC_URL set: the OpenDAL backend — an HTTP client for
+//     storage-svc (see opendal.go, docs/OPENDAL.md). STORAGE_SVC_TOKEN
+//     must also be set (fail-closed; storage-svc rejects unauthenticated
+//     mutating calls anyway, but we fail before serving traffic).
+//  2. All of S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY, S3_SECRET_KEY set:
 //     an S3-compatible store (S3_REGION defaults to us-east-1; S3_USE_SSL
 //     defaults to true — set it to "false" for plaintext dev MinIO).
-//   - Some but not all set: error listing every missing variable
+//  3. Some but not all set: error listing every missing variable
 //     (fail-closed; a half-configured client is never returned).
-//   - None set: BLOB_REQUIRED=true is an error (production must not
+//  4. None set: BLOB_REQUIRED=true is an error (production must not
 //     silently downgrade); otherwise the filesystem fallback under
 //     BLOB_FS_ROOT (default /tmp/blobstore) is returned with a warning.
 //
-// The warning string is empty on the fully configured S3 path. Blob bytes
+// The warning string is empty on the fully configured paths. Blob bytes
 // are never logged; the warning mentions configuration only.
 func FromEnv() (Store, string, error) {
+	if svc := strings.TrimSpace(os.Getenv("STORAGE_SVC_URL")); svc != "" {
+		st, err := NewOpenDAL(svc, os.Getenv("STORAGE_SVC_TOKEN"))
+		if err != nil {
+			return nil, "", err
+		}
+		return st, "", nil
+	}
 	vals := map[string]string{}
 	var missing []string
 	for _, k := range s3RequiredEnv {

@@ -626,3 +626,35 @@ PWA build verified; YAML/JSON/shell linted.
   wal_level=logical. Docs: docs/CDC.md. No live-broker test in sandbox;
   full refresh remains the authoritative fallback.
 - Fixed pre-existing flaky glidepath TestPersistRoundTrip (set-compare).
+
+## Gap closure — gap 10 + OpenDAL main storage + leftovers (2026-11-17)
+Closes the final numbered competitive gap (10: pricing/partner network),
+makes Apache OpenDAL the platform's main storage layer, and clears the
+two code-closeable leftovers. go build/vet/test all green (incl. OpenAPI
+contract); 43 analytics Python tests OK; compose YAML linted.
+
+- Gap 10 — pricing + partner network: internal/pricing (tier catalog
+  STARTER/GROWTH/SCALE/ENTERPRISE, effective-dated plan assignment,
+  deterministic kobo-exact Quote -> billing.Line) + internal/partners
+  (organizational partners BANK/TELCO/FINTECH/AGGREGATOR, referral
+  attribution first-write-wins, bps revenue-share accrual, settlement
+  reports). 11 routes (/v1/pricing/*, /v1/partners/*), snapshot
+  persistence (pricing.tier/.assignment, partners.partner/.attribution/
+  .accrual). Docs: docs/PRICING-PARTNERS.md.
+- OpenDAL main storage: storage-svc Rust microservice (opendal crate
+  0.54, axum; fs/s3/memory backends, gcs/azblob feature-gated; HMAC
+  presign backend-independent; bearer auth; fail-closed). internal/
+  blobstore gains opendal backend — FromEnv priority STORAGE_SVC_URL
+  (primary) -> direct S3 -> FS fallback. analytics/lakeio.py wires
+  extract/CDC/run through OpenDAL when LAKE_URI set (local FS unchanged
+  otherwise). 12 Rust + 7 Go + 9 Python new tests; cross-language smoke
+  (Go client -> real Rust binary -> presign redeem) passed.
+  Docs: docs/OPENDAL.md.
+- Leftovers: Africa's Talking USSD callback POST /v1/ussd/callback
+  (stateless cumulative-text parsing against chatbot USSDCode menu,
+  en+pcm, CON/END, no PII logging); body cap raised 10->15MB raw
+  (base64 inflation headroom; MaxBytesReader enforcement proven).
+  Docs: docs/USSD.md, OBJECT-STORAGE.md updated.
+- Caveats: storage-svc Dockerfile untested (no docker in sandbox);
+  DuckDB model builds need local/fs lake; AT shortcode registration
+  manual; Rust 1.83 MSRV pins in Cargo.lock (rsproxy.cn mirror).

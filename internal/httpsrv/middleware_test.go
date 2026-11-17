@@ -2,6 +2,8 @@ package httpsrv
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -113,6 +115,41 @@ func TestMaxBodyPassesWithinLimit(t *testing.T) {
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/x", strings.NewReader(`{"a":"b"}`)))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+}
+
+func TestMaxBodyTruncatesUndeclaredOverread(t *testing.T) {
+	// Chunked / unknown Content-Length (-1) bypasses the up-front 413 check
+	// by definition; http.MaxBytesReader must still cap the stream so a
+	// chunked body cannot smuggle more than n bytes into a handler.
+	h := MaxBody(16)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, "BAD_REQUEST", err)
+			return
+		}
+		if int64(len(body)) > 16 {
+			WriteError(w, http.StatusRequestEntityTooLarge, "BODY_TOO_LARGE",
+				errors.New("handler read past the cap"))
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/x", strings.NewReader(strings.Repeat("a", 64)))
+	req.ContentLength = -1 // chunked/unknown
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	// MaxBytesReader makes the over-read surface as a read error, which the
+	// handler turns into a 400 — never a silent success with 64 bytes read.
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (handler-side read error from MaxBytesReader)", rr.Code)
+	}
+	var env ErrorBody
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Code != "BAD_REQUEST" {
+		t.Fatalf("envelope code = %q, want BAD_REQUEST", env.Code)
 	}
 }
 
