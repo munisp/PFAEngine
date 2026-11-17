@@ -7,13 +7,17 @@
 package docupload
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/munisp/pfaengine/internal/casemgmt"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Kind enumerates accepted document types.
@@ -41,34 +45,56 @@ const (
 // Document is one uploaded KYC artefact (metadata only; the blob lives in
 // object storage at Ref).
 type Document struct {
-	ID         string    `json:"id"`
-	TenantID   string    `json:"tenant_id"`
-	MemberID   string    `json:"member_id"`
-	Kind       Kind      `json:"kind"`
-	Filename   string    `json:"filename"`
-	Mime       string    `json:"mime"`
-	SizeBytes  int64     `json:"size_bytes"`
-	Ref        string    `json:"ref"` // object-storage URI
-	SHA256     string    `json:"sha256"`
-	Status     Status    `json:"status"`
-	Reviewer   string    `json:"reviewer,omitempty"`
-	ReviewNote string    `json:"review_note,omitempty"`
-	CaseID     string    `json:"case_id,omitempty"` // linked KYC_REVIEW case
-	UploadedAt time.Time `json:"uploaded_at"`
+	ID         string     `json:"id"`
+	TenantID   string     `json:"tenant_id"`
+	MemberID   string     `json:"member_id"`
+	Kind       Kind       `json:"kind"`
+	Filename   string     `json:"filename"`
+	Mime       string     `json:"mime"`
+	SizeBytes  int64      `json:"size_bytes"`
+	Ref        string     `json:"ref"` // object-storage URI
+	SHA256     string     `json:"sha256"`
+	Status     Status     `json:"status"`
+	Reviewer   string     `json:"reviewer,omitempty"`
+	ReviewNote string     `json:"review_note,omitempty"`
+	CaseID     string     `json:"case_id,omitempty"` // linked KYC_REVIEW case
+	UploadedAt time.Time  `json:"uploaded_at"`
 	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
 }
 
 // Engine manages document capture and review.
 type Engine struct {
-	mu     sync.Mutex
-	docs   map[string]*Document
-	seq    int
-	cases  *casemgmt.Engine // nil-tolerant (unit tests without casemgmt)
+	mu    sync.Mutex
+	docs  map[string]*Document
+	seq   int
+	cases *casemgmt.Engine // nil-tolerant (unit tests without casemgmt)
+	sink  persist.Sink     // nil in pure in-memory mode
 }
 
 // New wires the engine to the case engine (may be nil in tests).
 func New(cases *casemgmt.Engine) *Engine {
 	return &Engine{docs: map[string]*Document{}, cases: cases}
+}
+
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (e *Engine) AttachSink(s persist.Sink) { e.sink = s }
+
+// Restore rehydrates documents from boot snapshots; foreign kinds ignored.
+func (e *Engine) Restore(snaps []persist.Snapshot) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range persist.OfKind(snaps, "docupload.doc") {
+		var d Document
+		if err := json.Unmarshal(s.Payload, &d); err != nil {
+			return err
+		}
+		dc := d
+		e.docs[d.ID] = &dc
+		if n, err := strconv.Atoi(strings.TrimPrefix(d.ID, "doc-")); err == nil && n > e.seq {
+			e.seq = n
+		}
+	}
+	return nil
 }
 
 // Submit records an uploaded document and opens a KYC_REVIEW case.
@@ -108,6 +134,7 @@ func (e *Engine) Submit(tenantID, memberID string, kind Kind, filename, mime str
 			e.mu.Unlock()
 		}
 	}
+	persist.Save(e.sink, "docupload.doc", tenantID, out.ID, out)
 	return out, nil
 }
 
@@ -141,6 +168,7 @@ func (e *Engine) Review(tenantID, id, reviewer string, approve bool, note string
 		}
 		_, _ = e.cases.Resolve(tenantID, caseID, fmt.Sprintf("Document %s: %s", d.Kind, note), code, reviewer)
 	}
+	persist.Save(e.sink, "docupload.doc", tenantID, out.ID, out)
 	return out, nil
 }
 
@@ -148,16 +176,20 @@ func (e *Engine) Review(tenantID, id, reviewer string, approve bool, note string
 // reviewer).
 func (e *Engine) StartReview(tenantID, id, reviewer string) (Document, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	d, ok := e.docs[id]
 	if !ok || d.TenantID != tenantID {
+		e.mu.Unlock()
 		return Document{}, fmt.Errorf("docupload: document %s not found", id)
 	}
 	if d.Status != Submitted && d.Status != UnderReview {
+		e.mu.Unlock()
 		return Document{}, errors.New("docupload: document already decided")
 	}
 	d.Status, d.Reviewer = UnderReview, reviewer
-	return *d, nil
+	out := *d
+	e.mu.Unlock()
+	persist.Save(e.sink, "docupload.doc", tenantID, out.ID, out)
+	return out, nil
 }
 
 // Pending returns the review queue (submitted or under review).

@@ -73,7 +73,7 @@ func TestContributionValidation(t *testing.T) {
 func TestPPFAggregates(t *testing.T) {
 	e := NewEngine()
 	now := time.Now()
-	e.RecordContribution("t1", SourceFG, "FG", money.NGN(200_000_000_00), "2026-11", now)       // ₦200bn
+	e.RecordContribution("t1", SourceFG, "FG", money.NGN(200_000_000_00), "2026-11", now)             // ₦200bn
 	e.RecordContribution("t1", SourceIndustry, "INDUSTRY", money.NGN(200_000_000_00), "2026-11", now) // ₦200bn
 	e.RecordContribution("t1", SourceEmployer, "emp-1", money.NGN(50_000_00), "2026-11", now)
 	e.RecordContribution("t2", SourceFG, "FG", money.NGN(1), "2026-11", now) // other tenant excluded
@@ -115,10 +115,10 @@ func TestAssessPayroll(t *testing.T) {
 	e := NewEngine()
 	e.RecordContribution("t1", SourceState, "LA", money.NGN(1000), "2026-11", time.Now())
 	rows := []PayrollRow{
-		{RSAID: "r1", Sector: SectorPrivate, MonthlyPension: money.NGN(40000)},  // +12,500
+		{RSAID: "r1", Sector: SectorPrivate, MonthlyPension: money.NGN(40000)},                // +12,500
 		{RSAID: "r2", Sector: SectorState, StateCode: "LA", MonthlyPension: money.NGN(50000)}, // +2,500
 		{RSAID: "r3", Sector: SectorState, StateCode: "KD", MonthlyPension: money.NGN(10000)}, // gated
-		{RSAID: "r4", Sector: SectorFederal, MonthlyPension: money.NGN(80000)},  // above floor
+		{RSAID: "r4", Sector: SectorFederal, MonthlyPension: money.NGN(80000)},                // above floor
 	}
 	assessments, total := e.AssessPayroll("t1", "2026-11", rows, time.Now())
 	if len(assessments) != 4 {

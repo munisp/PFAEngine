@@ -20,7 +20,7 @@ type Tx struct {
 	MemberID  string     `json:"member_id"`
 	Kind      string     `json:"kind"` // CONTRIBUTION | WITHDRAWAL | TRANSFER
 	Amount    money.Kobo `json:"amount_kobo"`
-	Channel   string     `json:"channel"`   // USSD | WEB | WHATSAPP | AGENT | API
+	Channel   string     `json:"channel"`    // USSD | WEB | WHATSAPP | AGENT | API
 	StateCode string     `json:"state_code"` // member's transaction geo
 	At        time.Time  `json:"at"`
 }
@@ -36,14 +36,14 @@ const (
 
 // Case is an opened investigation.
 type Case struct {
-	ID        string     `json:"id"`
-	TenantID  string     `json:"tenant_id"`
-	MemberID  string     `json:"member_id"`
-	Score     int        `json:"score"`
-	Signals   []string   `json:"signals"`
-	Tx        Tx         `json:"tx"`
-	Status    CaseStatus `json:"status"`
-	OpenedAt  time.Time  `json:"opened_at"`
+	ID       string     `json:"id"`
+	TenantID string     `json:"tenant_id"`
+	MemberID string     `json:"member_id"`
+	Score    int        `json:"score"`
+	Signals  []string   `json:"signals"`
+	Tx       Tx         `json:"tx"`
+	Status   CaseStatus `json:"status"`
+	OpenedAt time.Time  `json:"opened_at"`
 }
 
 // ScoreThreshold is the score at/above which a case opens automatically.
@@ -51,11 +51,11 @@ const ScoreThreshold = 60
 
 // Engine screens transactions and manages cases.
 type Engine struct {
-	mu       sync.Mutex
-	history  map[string][]Tx // tenantID|memberID -> recent txs
-	cases    map[string]*Case
-	caseSeq  int
-	window   time.Duration // velocity window
+	mu      sync.Mutex
+	history map[string][]Tx // tenantID|memberID -> recent txs
+	cases   map[string]*Case
+	caseSeq int
+	window  time.Duration // velocity window
 }
 
 func NewEngine() *Engine {

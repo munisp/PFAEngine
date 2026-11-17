@@ -16,33 +16,33 @@ import (
 )
 
 var (
-	ErrNoAgent    = errors.New("agents: agent not found")
-	ErrSuspended  = errors.New("agents: agent is suspended")
-	ErrBadAmount  = errors.New("agents: amount must be positive")
+	ErrNoAgent   = errors.New("agents: agent not found")
+	ErrSuspended = errors.New("agents: agent is suspended")
+	ErrBadAmount = errors.New("agents: amount must be positive")
 )
 
 // Agent is an accredited field agent.
 type Agent struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	Name         string    `json:"name"`
-	Phone        string    `json:"phone"`
-	StateCode    string    `json:"state_code"`
-	CommissionBps int64    `json:"commission_bps"` // share of originated contributions
-	Suspended    bool      `json:"suspended"`
-	AccreditedAt time.Time `json:"accredited_at"`
+	ID            string    `json:"id"`
+	TenantID      string    `json:"tenant_id"`
+	Name          string    `json:"name"`
+	Phone         string    `json:"phone"`
+	StateCode     string    `json:"state_code"`
+	CommissionBps int64     `json:"commission_bps"` // share of originated contributions
+	Suspended     bool      `json:"suspended"`
+	AccreditedAt  time.Time `json:"accredited_at"`
 }
 
 // Enrolment is one agent-originated micro-pension account opening.
 type Enrolment struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	AgentID   string    `json:"agent_id"`
-	RSAID     string    `json:"rsa_id"`
-	Name      string    `json:"name"`
-	Phone     string    `json:"phone"`
-	Trade     string    `json:"trade"` // trader | artisan | farmer | rider | ...
-	At        time.Time `json:"at"`
+	ID       string    `json:"id"`
+	TenantID string    `json:"tenant_id"`
+	AgentID  string    `json:"agent_id"`
+	RSAID    string    `json:"rsa_id"`
+	Name     string    `json:"name"`
+	Phone    string    `json:"phone"`
+	Trade    string    `json:"trade"` // trader | artisan | farmer | rider | ...
+	At       time.Time `json:"at"`
 }
 
 // Commission is one WORM commission ledger entry.
@@ -58,11 +58,11 @@ type Commission struct {
 
 // Engine holds agents, enrolments and the commission ledger.
 type Engine struct {
-	mu         sync.Mutex
-	agents     map[string]*Agent // tenantID|id
-	enrolments []Enrolment
+	mu          sync.Mutex
+	agents      map[string]*Agent // tenantID|id
+	enrolments  []Enrolment
 	commissions []Commission
-	seq        int
+	seq         int
 }
 
 func NewEngine() *Engine { return &Engine{agents: map[string]*Agent{}} }

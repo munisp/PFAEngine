@@ -25,10 +25,10 @@ const (
 )
 
 var (
-	ErrNoKey        = errors.New("embedded: api key not found")
-	ErrRevoked      = errors.New("embedded: api key revoked")
-	ErrScopeDenied  = errors.New("embedded: scope not granted")
-	ErrNoWebhook    = errors.New("embedded: webhook not found")
+	ErrNoKey       = errors.New("embedded: api key not found")
+	ErrRevoked     = errors.New("embedded: api key revoked")
+	ErrScopeDenied = errors.New("embedded: scope not granted")
+	ErrNoWebhook   = errors.New("embedded: webhook not found")
 )
 
 // Key is an issued API key. Only the SHA-256 hash is stored.

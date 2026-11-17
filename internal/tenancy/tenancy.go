@@ -4,9 +4,12 @@ package tenancy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 type ctxKey struct{}
@@ -44,18 +47,48 @@ type Registry struct {
 	mu       sync.Mutex
 	tenants  map[string]*Tenant
 	licenses map[string]LicenseProfile
+	sink     persist.Sink // nil in pure in-memory mode
 }
 
 func NewRegistry() *Registry {
 	return &Registry{tenants: map[string]*Tenant{}, licenses: map[string]LicenseProfile{}}
 }
 
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (r *Registry) AttachSink(s persist.Sink) { r.sink = s }
+
+// Restore rehydrates tenants and licence profiles from boot snapshots.
+// Tenant snapshots use kind "tenancy.tenant" with entity id = tenant id;
+// licence snapshots use kind "tenancy.license".
+func (r *Registry) Restore(snaps []persist.Snapshot) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range snaps {
+		switch s.Kind {
+		case "tenancy.tenant":
+			var t Tenant
+			if err := json.Unmarshal(s.Payload, &t); err != nil {
+				return err
+			}
+			tc := t
+			r.tenants[t.ID] = &tc
+		case "tenancy.license":
+			var lp LicenseProfile
+			if err := json.Unmarshal(s.Payload, &lp); err != nil {
+				return err
+			}
+			r.licenses[s.EntityID] = lp
+		}
+	}
+	return nil
+}
+
 // Provision creates a tenant with schema, branding and flags — the entire
 // operation is synchronous configuration, measured in seconds (BR-05).
 func (r *Registry) Provision(t Tenant) (*Tenant, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if t.ID == "" || t.Name == "" {
+		r.mu.Unlock()
 		return nil, errors.New("tenancy: id and name required")
 	}
 	if t.Schema == "" {
@@ -79,6 +112,8 @@ func (r *Registry) Provision(t Tenant) (*Tenant, error) {
 	t.CreatedAt = time.Now().UTC()
 	cp := t
 	r.tenants[t.ID] = &cp
+	r.mu.Unlock()
+	persist.Save(r.sink, "tenancy.tenant", t.ID, t.ID, cp)
 	return &cp, nil
 }
 
@@ -143,9 +178,9 @@ type LicenseProfile struct {
 // SetLicenseProfile records the PenCom licence profile for a tenant.
 func (r *Registry) SetLicenseProfile(tenantID string, lp LicenseProfile) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	t, ok := r.tenants[tenantID]
 	if !ok {
+		r.mu.Unlock()
 		return ErrNoTenant
 	}
 	if lp.Class == "" {
@@ -158,8 +193,11 @@ func (r *Registry) SetLicenseProfile(tenantID string, lp LicenseProfile) error {
 		t.Branding = map[string]string{}
 	}
 	t.LicenseNo = lp.LicenseNo
-	// Licence profile rides on the tenant record; persist via fields below.
 	r.licenses[tenantID] = lp
+	tc := *t
+	r.mu.Unlock()
+	persist.Save(r.sink, "tenancy.license", tenantID, tenantID, lp)
+	persist.Save(r.sink, "tenancy.tenant", tenantID, tenantID, tc)
 	return nil
 }
 

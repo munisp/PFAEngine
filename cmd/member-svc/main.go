@@ -55,7 +55,10 @@ import (
 	"github.com/munisp/pfaengine/internal/mpg"
 	"github.com/munisp/pfaengine/internal/news"
 	"github.com/munisp/pfaengine/internal/onboarding"
+	"github.com/munisp/pfaengine/internal/payroll"
 	"github.com/munisp/pfaengine/internal/pencare"
+	"github.com/munisp/pfaengine/internal/pencomrails"
+	"github.com/munisp/pfaengine/internal/persist"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/readiness"
 	"github.com/munisp/pfaengine/internal/recon"
@@ -66,6 +69,7 @@ import (
 	"github.com/munisp/pfaengine/internal/store"
 	"github.com/munisp/pfaengine/internal/succession"
 	"github.com/munisp/pfaengine/internal/tenancy"
+	"github.com/munisp/pfaengine/internal/vendors"
 )
 
 // deps bundles the domain stores the handlers operate on.
@@ -129,6 +133,9 @@ type deps struct {
 	cases    *casemgmt.Engine
 	crm      *crm.Engine
 	caseRepo *store.CaseRepo
+	// Gap-5 persistence: generic JSONB snapshot repo (nil unless DATABASE_URL
+	// set). Every stateful engine writes through and rehydrates on boot.
+	snapRepo *store.SnapshotRepo
 	// Tranche 21: PenCom-parity regulatory surface.
 	docslib    *docslib.Library
 	docupload  *docupload.Engine
@@ -144,6 +151,14 @@ type deps struct {
 	ekycIntel ekyc.DocIntel
 	kyb       *kyb.Engine
 	aml       *aml.Service
+	// Gap 3/4: payroll + PenCom rails (nil when env not configured — the
+	// handlers fail closed with 503 RAIL_UNCONFIGURED).
+	erpnext      *payroll.ERPNextClient
+	pencap       *pencomrails.PENCAPClient
+	rts          *pencomrails.RTSHub
+	pssp         *pencomrails.PSSPClient
+	payMu        sync.Mutex
+	paySchedules map[string]payroll.Schedule
 	// stmtSecret signs statement verification codes.
 	stmtSecret []byte
 }
@@ -170,6 +185,7 @@ func main() {
 	var invmandateRepo *store.InvMandateRepo
 	var innovateRepo *store.InnovateRepo
 	var caseRepo *store.CaseRepo
+	var snapRepo *store.SnapshotRepo
 	if dsn := httpsrv.Getenv("DATABASE_URL", ""); dsn != "" {
 		db, err := store.Open(context.Background(), dsn)
 		if err != nil {
@@ -183,16 +199,32 @@ func main() {
 		invmandateRepo = store.NewInvMandateRepo(db)
 		innovateRepo = store.NewInnovateRepo(db)
 		caseRepo = store.NewCaseRepo(db)
-		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate + innovations + casemgmt persist to Postgres")
+		snapRepo = store.NewSnapshotRepo(db)
+		persist.OnError = func(err error) { log.Printf("member-svc: snapshot persist: %v", err) }
+		log.Printf("member-svc: DATABASE_URL set — onboarding + prefs + mpg + pencare + invmandate + innovations + casemgmt + engine snapshots persist to Postgres")
 	}
 	mpgEngine := mpg.NewEngine()
-	literacyEngine := literacy.NewEngine()
-	literacyEngine.Seed()
+	literacyEngine := literacy.NewEngine() // Seed() runs after sink attach/restore
 	caseEngine := casemgmt.New(caseRepo)
-	d := &deps{
-		kyc: kyc.NewService(salt,
+	// Gap-2: vendor selection is env-configurable. When SMILE_ID_* or
+	// DOJAH_* credentials are present the live adapters are used; otherwise
+	// the mock providers keep dev/test flows working.
+	ven := vendors.FromEnv()
+	for _, w := range ven.Warnings {
+		log.Printf("member-svc: vendor config: %s", w)
+	}
+	kycProviders := ven.KYCProviders()
+	if len(kycProviders) == 0 {
+		kycProviders = []kyc.Provider{
 			kyc.MockProvider{ProviderName: "mock-nimc"},
-			kyc.MockProvider{ProviderName: "mock-dojah"}),
+			kyc.MockProvider{ProviderName: "mock-dojah"},
+		}
+		log.Printf("member-svc: no KYC vendor credentials — mock providers active (set SMILE_ID_* or DOJAH_* for live)")
+	} else {
+		log.Printf("member-svc: live vendors: %s", strings.Join(ven.Summary(), ", "))
+	}
+	d := &deps{
+		kyc:            kyc.NewService(salt, kycProviders...),
 		members:        member.NewRegistry(),
 		ledger:         ledger.New(),
 		recon:          recon.NewEngine(),
@@ -232,32 +264,14 @@ func main() {
 	}
 	d.crm = crm.New(caseEngine, d.memberFacts)
 
-	// Tranche 21 wiring: regulatory surface engines.
+	// Tranche 21/22 wiring: regulatory-surface + eKYC/KYB engines.
 	d.docslib = docslib.New()
-	for _, t := range strings.Split(httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo")), ",") {
-		if t = strings.TrimSpace(t); t != "" {
-			d.docslib.SeedStandard(t)
-		}
-	}
 	d.docupload = docupload.New(caseEngine)
 	d.branch = branch.New()
 	d.disclosure = disclosure.New()
 	d.news = news.New()
 	d.funds = funds.NewRegistry()
-	for _, t := range strings.Split(httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo")), ",") {
-		if t = strings.TrimSpace(t); t != "" {
-			d.funds.SeedStandard(t)
-		}
-	}
 	d.tenants = tenancy.NewRegistry()
-	if _, err := d.tenants.Provision(tenancy.Tenant{
-		ID: httpsrv.Getenv("DEFAULT_TENANT", "demo"), Name: httpsrv.Getenv("TENANT_NAME", "PFAEngine Demo PFA"),
-		LicenseNo: httpsrv.Getenv("PENCOM_LICENSE_NO", "PFA-0000"),
-	}); err != nil {
-		log.Printf("member-svc: default tenant provision: %v", err)
-	}
-
-	// Tranche 22 wiring: eKYC sidecar client (fail-closed) + engines.
 	if u := httpsrv.Getenv("KYC_SERVICE_URL", ""); u != "" {
 		d.ekycIntel = ekyc.NewClient(u)
 	} else {
@@ -267,6 +281,111 @@ func main() {
 	d.aml = aml.NewService()
 	d.ekyc = ekyc.New(d.ekycIntel, d.kyc, caseEngine)
 	d.kyb = kyb.New(d.aml, caseEngine)
+
+	// Gap 3/4: payroll (ERPNext/Frappe HR) + PenCom rails (PENCAP, RTS,
+	// PSSP). All env-configured; absent credentials leave nil clients and
+	// the routes answer 503 RAIL_UNCONFIGURED.
+	d.paySchedules = map[string]payroll.Schedule{}
+	if c, ok := payroll.NewERPNextFromEnv(); ok {
+		d.erpnext = &c
+		log.Printf("member-svc: payroll: ERPNext adapter configured (%s)", httpsrv.Getenv("ERPNEXT_BASE_URL", ""))
+	} else {
+		log.Printf("member-svc: payroll: ERPNext not configured (set ERPNEXT_BASE_URL/API_KEY/API_SECRET)")
+	}
+	if c, err := pencomrails.NewPENCAPFromEnv(); err == nil {
+		d.pencap = c
+		log.Printf("member-svc: pencom rails: PENCAP configured")
+	}
+	if c, err := pencomrails.NewRTSFromEnv(); err == nil {
+		d.rts = c
+		log.Printf("member-svc: pencom rails: RTS hub configured")
+	}
+	if c, err := pencomrails.NewPSSPFromEnv(); err == nil {
+		d.pssp = c
+		log.Printf("member-svc: pencom rails: PSSP configured")
+	}
+
+	// Gap-5 persistence: attach the snapshot sink to every stateful engine
+	// and rehydrate from Postgres before any seeding runs (seeders are
+	// idempotent and skip codes/funds that restored state already has).
+	if snapRepo != nil {
+		d.docslib.AttachSink(snapRepo)
+		d.docupload.AttachSink(snapRepo)
+		d.branch.AttachSink(snapRepo)
+		d.disclosure.AttachSink(snapRepo)
+		d.news.AttachSink(snapRepo)
+		d.funds.AttachSink(snapRepo)
+		d.tenants.AttachSink(snapRepo)
+		d.ekyc.AttachSink(snapRepo)
+		d.kyb.AttachSink(snapRepo)
+		// Tranche-17 innovation engines (gap-5: no in-memory-only state).
+		d.roundup.AttachSink(snapRepo)
+		d.glidepath.AttachSink(snapRepo)
+		d.literacy.AttachSink(snapRepo)
+		d.claimsfast.AttachSink(snapRepo)
+		d.readiness.AttachSink(snapRepo)
+		d.diaspora.AttachSink(snapRepo)
+		d.regfile.AttachSink(snapRepo)
+		d.esg.AttachSink(snapRepo)
+		d.snapRepo = snapRepo
+		tenantList := httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo"))
+		n := 0
+		// "_global" holds cross-tenant snapshots (literacy lessons, diaspora
+		// FX rates) in addition to each configured tenant.
+		for _, t := range append(strings.Split(tenantList, ","), "_global") {
+			t = strings.TrimSpace(t)
+			if t == "" {
+				continue
+			}
+			snaps, err := snapRepo.LoadSnapshots(context.Background(), t)
+			if err != nil {
+				log.Printf("member-svc: snapshot load %s: %v", t, err)
+				continue
+			}
+			n += len(snaps)
+			for name, restore := range map[string]func([]persist.Snapshot) error{
+				"docslib": d.docslib.Restore, "docupload": d.docupload.Restore,
+				"branch": d.branch.Restore, "disclosure": d.disclosure.Restore,
+				"news": d.news.Restore, "funds": d.funds.Restore,
+				"tenancy": d.tenants.Restore, "ekyc": d.ekyc.Restore, "kyb": d.kyb.Restore,
+				"roundup": d.roundup.Restore, "glidepath": d.glidepath.Restore,
+				"literacy": d.literacy.Restore, "claimsfast": d.claimsfast.Restore,
+				"readiness": d.readiness.Restore, "diaspora": d.diaspora.Restore,
+				"regfile": d.regfile.Restore, "esg": d.esg.Restore,
+			} {
+				if err := restore(snaps); err != nil {
+					log.Printf("member-svc: restore %s/%s: %v", name, t, err)
+				}
+			}
+			// Payroll schedules live on deps (no engine) — restore inline.
+			for _, s := range persist.OfKind(snaps, "payroll.schedule") {
+				var sc payroll.Schedule
+				if err := json.Unmarshal(s.Payload, &sc); err == nil && sc.ID != "" {
+					d.paySchedules[sc.ID] = sc
+				}
+			}
+		}
+		log.Printf("member-svc: rehydrated %d engine snapshots across [%s]", n, tenantList)
+	}
+
+	// Seed standard catalogues (idempotent — skip codes already restored).
+	d.literacy.Seed()
+	for _, t := range strings.Split(httpsrv.Getenv("CASEMGMT_TENANTS", httpsrv.Getenv("DEFAULT_TENANT", "demo")), ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			d.docslib.SeedStandard(t)
+			d.funds.SeedStandard(t)
+		}
+	}
+	// Provision the default tenant unless restore already brought it back.
+	defTenant := httpsrv.Getenv("DEFAULT_TENANT", "demo")
+	if _, ok := d.tenants.Get(defTenant); !ok {
+		if _, err := d.tenants.Provision(tenancy.Tenant{
+			ID: defTenant, Name: httpsrv.Getenv("TENANT_NAME", "PFAEngine Demo PFA"),
+			LicenseNo: httpsrv.Getenv("PENCOM_LICENSE_NO", "PFA-0000"),
+		}); err != nil {
+			log.Printf("member-svc: default tenant provision: %v", err)
+		}
+	}
 	// Rehydrate persisted cases for configured tenants (boot warm-up).
 	// CASEMGMT_TENANTS is a comma-separated tenant list; defaults to the
 	// DEFAULT_TENANT (or "demo").
@@ -462,6 +581,19 @@ var apiRoutes = []routeEntry{
 	{"GET", "/api/v1/kyb/businesses", func(d *deps) http.HandlerFunc { return d.kybList }},
 	{"GET", "/api/v1/kyb/businesses/{id}", func(d *deps) http.HandlerFunc { return d.kybGet }},
 	{"POST", "/api/v1/kyb/businesses/{id}/review", func(d *deps) http.HandlerFunc { return d.kybReview }},
+	// Gap 3: payroll provider integration (ERPNext/Frappe HR) + PSSP files.
+	{"POST", "/api/v1/payroll/erpnext/sync", func(d *deps) http.HandlerFunc { return d.payrollERPNextSync }},
+	{"POST", "/api/v1/payroll/schedules/{id}/push", func(d *deps) http.HandlerFunc { return d.payrollPush }},
+	{"POST", "/api/v1/payroll/pssp/import", func(d *deps) http.HandlerFunc { return d.psspImport }},
+	{"GET", "/api/v1/payroll/pssp/export", func(d *deps) http.HandlerFunc { return d.psspExport }},
+	// Gap 4: PenCom rails (PENCAP recapture, RTS transfers, PSSP channel).
+	{"POST", "/api/v1/pencom/recapture", func(d *deps) http.HandlerFunc { return d.pencomRecaptureSubmit }},
+	{"GET", "/api/v1/pencom/recapture/{batchId}", func(d *deps) http.HandlerFunc { return d.pencomRecaptureResults }},
+	{"POST", "/api/v1/pencom/transfers", func(d *deps) http.HandlerFunc { return d.pencomTransferInitiate }},
+	{"GET", "/api/v1/pencom/transfers", func(d *deps) http.HandlerFunc { return d.pencomTransfersInbound }},
+	{"POST", "/api/v1/pencom/transfers/{id}/confirm", func(d *deps) http.HandlerFunc { return d.pencomTransferConfirm }},
+	{"POST", "/api/v1/pencom/pssp/schedules", func(d *deps) http.HandlerFunc { return d.psspSubmit }},
+	{"GET", "/api/v1/pencom/pssp/schedules/{ref}", func(d *deps) http.HandlerFunc { return d.psspStatus }},
 }
 
 // Routes returns the registered route table as "METHOD /path" strings for

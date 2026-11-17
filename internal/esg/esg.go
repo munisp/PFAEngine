@@ -10,35 +10,37 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Metrics is one impact report against a deployment.
 type Metrics struct {
-	ID           string    `json:"id"`
-	TenantID     string    `json:"tenant_id"`
-	MandateID    string    `json:"mandate_id"`
-	DeploymentID string    `json:"deployment_id"`
-	JobsCreated  int64     `json:"jobs_created"`
-	Megawatts    int64     `json:"megawatts"`
-	RoadKm       int64     `json:"road_km"`
-	HomesFinanced int64    `json:"homes_financed"`
+	ID            string `json:"id"`
+	TenantID      string `json:"tenant_id"`
+	MandateID     string `json:"mandate_id"`
+	DeploymentID  string `json:"deployment_id"`
+	JobsCreated   int64  `json:"jobs_created"`
+	Megawatts     int64  `json:"megawatts"`
+	RoadKm        int64  `json:"road_km"`
+	HomesFinanced int64  `json:"homes_financed"`
 	// Governance/social sub-scores, 0–100 each.
-	EnvironmentScore int `json:"environment_score"`
-	SocialScore      int `json:"social_score"`
-	GovernanceScore  int `json:"governance_score"`
+	EnvironmentScore int       `json:"environment_score"`
+	SocialScore      int       `json:"social_score"`
+	GovernanceScore  int       `json:"governance_score"`
 	ReportedAt       time.Time `json:"reported_at"`
 }
 
 // Rollup aggregates metrics for a mandate.
 type Rollup struct {
-	MandateID      string `json:"mandate_id"`
-	Reports        int    `json:"reports"`
-	JobsCreated    int64  `json:"jobs_created"`
-	Megawatts      int64  `json:"megawatts"`
-	RoadKm         int64  `json:"road_km"`
-	HomesFinanced  int64  `json:"homes_financed"`
-	ESGScore       int    `json:"esg_score"` // mean of sub-scores across reports
-	Grade          string `json:"grade"`
+	MandateID     string `json:"mandate_id"`
+	Reports       int    `json:"reports"`
+	JobsCreated   int64  `json:"jobs_created"`
+	Megawatts     int64  `json:"megawatts"`
+	RoadKm        int64  `json:"road_km"`
+	HomesFinanced int64  `json:"homes_financed"`
+	ESGScore      int    `json:"esg_score"` // mean of sub-scores across reports
+	Grade         string `json:"grade"`
 }
 
 func grade(score int) string {
@@ -59,6 +61,7 @@ type Engine struct {
 	mu      sync.Mutex
 	reports []Metrics
 	seq     int
+	sink    persist.Sink
 }
 
 func NewEngine() *Engine { return &Engine{} }
@@ -84,6 +87,7 @@ func (e *Engine) Report(tenantID, mandateID, deploymentID string, jobs, mw, km, 
 		HomesFinanced: homes, EnvironmentScore: clamp(env), SocialScore: clamp(soc),
 		GovernanceScore: clamp(gov), ReportedAt: at}
 	e.reports = append(e.reports, m)
+	persist.Save(e.sink, kindReport, tenantID, m.ID, m)
 	return m
 }
 

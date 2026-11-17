@@ -91,11 +91,11 @@ type MemberFacts struct {
 
 // Member360 is the single-pane member view for staff.
 type Member360 struct {
-	MemberID         string          `json:"member_id"`
-	Facts            MemberFacts     `json:"facts"`
-	Segments         []SegmentTag    `json:"segments"`
+	MemberID string       `json:"member_id"`
+	Facts    MemberFacts  `json:"facts"`
+	Segments []SegmentTag `json:"segments"`
 	// RelationshipManager is the member's dedicated RM (T21).
-	RelationshipManager string `json:"relationship_manager,omitempty"`
+	RelationshipManager string          `json:"relationship_manager,omitempty"`
 	OpenCases           []casemgmt.Case `json:"open_cases"`
 	RecentCases         []casemgmt.Case `json:"recent_cases"`
 	Timeline            []Interaction   `json:"timeline"`

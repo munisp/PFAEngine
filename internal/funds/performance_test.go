@@ -14,7 +14,7 @@ func seeded(t *testing.T) *Registry {
 	price := int64(100_00) // ₦100.00 per unit in kobo
 	for m := 0; m <= 45; m++ {
 		y := 2023 + m/12
-		mm := m % 12 + 1
+		mm := m%12 + 1
 		date := []string{"", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"}[mm]
 		d := itoa(y) + "-" + date + "-28"
 		if err := r.PublishNAV(FundII, d, money.Kobo(price)); err != nil {

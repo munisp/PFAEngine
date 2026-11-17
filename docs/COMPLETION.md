@@ -522,3 +522,42 @@ docs/T21-REGULATORY-SURFACE.md.
 - Verified: go test ./... all pass (7 ekyc + 7 kyb + 2 new e2e suites);
   python unittest 11/11 for sidecar extraction logic; staff-portal build
   clean (280KB). See docs/T22-EKYC-KYB.md.
+
+## Gap closure — competitive analysis remediation (2026-11-17)
+Closes gaps 2, 3, 4 and 5 from PFAEngine-competitive-gap-analysis
+(score 82/100). 78 Go packages pass; member-svc e2e suites green.
+
+- Gap 2 — live vendor adapters (internal/vendors/env.go):
+  vendors.FromEnv() builds every fully-configured adapter (Smile ID, Dojah,
+  Termii, Remita, Africa's Talking, WhatsApp); partial config → warning +
+  vendor disabled, never half-configured. member-svc KYC now uses live
+  Smile ID/Dojah when credentials are present (mocks otherwise);
+  employer-portal mints real Remita RRRs when REMITA_* is set; Termii/
+  WhatsApp were already env-wired in notification-svc. Docs:
+  docs/VENDOR-ADAPTERS.md.
+- Gap 3 — payroll integration (internal/payroll): open-source payroll via
+  ERPNext/Frappe HR REST adapter (token auth, Payroll Entry → Salary Slips
+  → PRA-2014 8%/10% pension split on basic+housing+transport, integer
+  kobo), plus PSSP schedule file formats (Pensphere + Interswitch Pension
+  Central CSV, naira↔kobo exact round-trip, line-numbered errors, zero/
+  negative-total rejection). 4 member-svc routes. Docs:
+  docs/PAYROLL-PSSP.md.
+- Gap 4 — PenCom rails (internal/pencomrails): PENCAP data-recapture
+  client (pipe-delimited file, SHA-256 integrity, validation-response
+  parsing), RTS transfer hub (PENDING→VALIDATED→CONFIRMED|REJECTED|
+  CANCELLED state machine, 365-day transfer eligibility rule, CSV
+  build/parse), PSSP schedule submission + status polling. 7 member-svc
+  routes; every rail fails closed with 503 RAIL_UNCONFIGURED when env is
+  absent. Wire layouts flagged as assumed pending bilateral specs. Docs:
+  docs/PENCOM-RAILS.md.
+- Gap 5 — platform-wide Postgres persistence: generic snapshot framework
+  (internal/persist Sink/Source contract + internal/store.SnapshotRepo,
+  db/migrations/0009_snapshots.sql, JSONB upsert + boot rehydrate per
+  tenant incl. "_global"). Wired across ALL previously in-memory engines:
+  docslib, docupload, branch, disclosure, news, funds (funds/NAV/
+  holdings), tenancy (+licence profile), ekyc sessions (exported fields
+  only — raw biometric images never persist), kyb, and the Tranche-17
+  set (roundup, glidepath, literacy, claimsfast, readiness, diaspora,
+  regfile, esg). Seeders made idempotent (docslib.SeedStandard,
+  literacy.Seed) so restart never duplicates; seq counters restore to
+  max+1 so IDs never collide. Round-trip tests in every package.

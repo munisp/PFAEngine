@@ -5,11 +5,16 @@
 package news
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Category classifies articles.
@@ -33,15 +38,15 @@ const (
 
 // Article is one CMS entry.
 type Article struct {
-	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
-	Title       string    `json:"title"`
-	Body        string    `json:"body"`
-	Category    Category  `json:"category"`
-	Pinned      bool      `json:"pinned"`
-	Status      Status    `json:"status"`
-	Author      string    `json:"author"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string     `json:"id"`
+	TenantID    string     `json:"tenant_id"`
+	Title       string     `json:"title"`
+	Body        string     `json:"body"`
+	Category    Category   `json:"category"`
+	Pinned      bool       `json:"pinned"`
+	Status      Status     `json:"status"`
+	Author      string     `json:"author"`
+	CreatedAt   time.Time  `json:"created_at"`
 	PublishedAt *time.Time `json:"published_at,omitempty"`
 }
 
@@ -50,10 +55,32 @@ type Engine struct {
 	mu       sync.Mutex
 	articles map[string]*Article
 	seq      int
+	sink     persist.Sink // nil in pure in-memory mode
 }
 
 // New returns an empty engine.
 func New() *Engine { return &Engine{articles: map[string]*Article{}} }
+
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (e *Engine) AttachSink(s persist.Sink) { e.sink = s }
+
+// Restore rehydrates articles from boot snapshots; foreign kinds ignored.
+func (e *Engine) Restore(snaps []persist.Snapshot) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range persist.OfKind(snaps, "news.article") {
+		var a Article
+		if err := json.Unmarshal(s.Payload, &a); err != nil {
+			return err
+		}
+		ac := a
+		e.articles[a.ID] = &ac
+		if n, err := strconv.Atoi(strings.TrimPrefix(a.ID, "art-")); err == nil && n > e.seq {
+			e.seq = n
+		}
+	}
+	return nil
+}
 
 // Create drafts an article.
 func (e *Engine) Create(tenantID, title, body string, cat Category, author string, pinned bool) (Article, error) {
@@ -66,7 +93,6 @@ func (e *Engine) Create(tenantID, title, body string, cat Category, author strin
 		return Article{}, fmt.Errorf("news: unsupported category %s", cat)
 	}
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.seq++
 	a := &Article{
 		ID: fmt.Sprintf("art-%05d", e.seq), TenantID: tenantID, Title: title,
@@ -74,35 +100,45 @@ func (e *Engine) Create(tenantID, title, body string, cat Category, author strin
 		Author: author, CreatedAt: time.Now(),
 	}
 	e.articles[a.ID] = a
-	return *a, nil
+	out := *a
+	e.mu.Unlock()
+	persist.Save(e.sink, "news.article", tenantID, out.ID, out)
+	return out, nil
 }
 
 // Publish releases a draft.
 func (e *Engine) Publish(tenantID, id string) (Article, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	a, ok := e.articles[id]
 	if !ok || a.TenantID != tenantID {
+		e.mu.Unlock()
 		return Article{}, fmt.Errorf("news: article %s not found", id)
 	}
 	if a.Status != Draft {
+		e.mu.Unlock()
 		return Article{}, errors.New("news: only drafts can be published")
 	}
 	now := time.Now()
 	a.Status, a.PublishedAt = Published, &now
-	return *a, nil
+	out := *a
+	e.mu.Unlock()
+	persist.Save(e.sink, "news.article", tenantID, out.ID, out)
+	return out, nil
 }
 
 // Archive withdraws an article from the public feed.
 func (e *Engine) Archive(tenantID, id string) (Article, error) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	a, ok := e.articles[id]
 	if !ok || a.TenantID != tenantID {
+		e.mu.Unlock()
 		return Article{}, fmt.Errorf("news: article %s not found", id)
 	}
 	a.Status = Archived
-	return *a, nil
+	out := *a
+	e.mu.Unlock()
+	persist.Save(e.sink, "news.article", tenantID, out.ID, out)
+	return out, nil
 }
 
 // Feed returns published articles (pinned first, then newest). Category

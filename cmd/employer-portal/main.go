@@ -23,6 +23,7 @@ import (
 	"github.com/munisp/pfaengine/internal/money"
 	"github.com/munisp/pfaengine/internal/onboarding"
 	"github.com/munisp/pfaengine/internal/store"
+	"github.com/munisp/pfaengine/internal/vendors"
 )
 
 // onb is the write-through onboarding store (Postgres when DATABASE_URL
@@ -214,6 +215,10 @@ func main() {
 	})
 
 	// Remittance file generation (FR-203): payment file for the bank rails.
+	// Gap-2: when REMITA_MERCHANT_ID/REMITA_API_KEY are configured a real
+	// Remita RRR is minted on the instruction; otherwise the reference is a
+	// deterministic placeholder (dev).
+	ven := vendors.FromEnv()
 	mux.HandleFunc("POST /v1/employers/{id}/remittance-file", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
 			ScheduleID string `json:"schedule_id"`
@@ -223,10 +228,18 @@ func main() {
 			appx.Err(w, 400, "BAD_REQUEST", err)
 			return
 		}
-		appx.JSON(w, 201, map[string]any{
+		out := map[string]any{
 			"file_id": "rem-" + in.ScheduleID, "format": "ISO20022-pain.001-derived",
 			"total": money.Kobo(in.TotalKobo).Naira(), "rail": "Remita/Interswitch",
-		})
+		}
+		if ven.Remita != nil {
+			ins := ven.Remita.GenerateRRR(r.PathValue("id"), in.ScheduleID, money.Kobo(in.TotalKobo))
+			out["rrr"] = ins.RRR
+			out["rail_live"] = true
+		} else {
+			out["rail_live"] = false
+		}
+		appx.JSON(w, 201, out)
 	})
 
 	appx.Serve("employer-portal", appx.Env("PORT", "8091"), appx.TenantMiddleware(mux))

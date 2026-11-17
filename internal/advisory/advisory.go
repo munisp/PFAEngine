@@ -26,11 +26,11 @@ type Projection struct {
 	AnnualReturnBps  int64      `json:"annual_return_bps"`
 	ProjectedBalance money.Kobo `json:"projected_balance_kobo"`
 	// ExpectedPension = projected balance spread over annuityMonths.
-	ExpectedPension  money.Kobo `json:"expected_pension_kobo"`
-	TargetPension    money.Kobo `json:"target_pension_kobo"` // replacementBps of salary
-	Gap              money.Kobo `json:"gap_kobo"`            // max(0, target − expected)
-	ExtraMonthly     money.Kobo `json:"extra_monthly_kobo"`  // added contribution closing the gap
-	OnTrack          bool       `json:"on_track"`
+	ExpectedPension money.Kobo `json:"expected_pension_kobo"`
+	TargetPension   money.Kobo `json:"target_pension_kobo"` // replacementBps of salary
+	Gap             money.Kobo `json:"gap_kobo"`            // max(0, target − expected)
+	ExtraMonthly    money.Kobo `json:"extra_monthly_kobo"`  // added contribution closing the gap
+	OnTrack         bool       `json:"on_track"`
 }
 
 // compound grows a balance with fixed monthly contributions over n months

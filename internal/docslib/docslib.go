@@ -7,11 +7,16 @@
 package docslib
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Category groups forms by member journey.
@@ -45,14 +50,44 @@ type Form struct {
 
 // Library is the tenant-scoped form registry.
 type Library struct {
-	mu    sync.Mutex
-	forms map[string]*Form // id -> form
-	seq   int
+	mu     sync.Mutex
+	forms  map[string]*Form // id -> form
+	seq    int
 	byCode map[string][]string // tenantID|code -> version-ordered ids
+	sink   persist.Sink        // nil in pure in-memory mode
 }
 
 // New returns an empty library seeded with the standard PenCom form set.
-func New() *Library { return &Library{forms: map[string]*Form{}, byCode: map[string][]string{}} }
+func New() *Library {
+	return &Library{forms: map[string]*Form{}, byCode: map[string][]string{}}
+}
+
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (l *Library) AttachSink(s persist.Sink) { l.sink = s }
+
+// Restore rehydrates forms from boot snapshots; foreign kinds are ignored.
+func (l *Library) Restore(snaps []persist.Snapshot) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, s := range persist.OfKind(snaps, "docslib.form") {
+		var f Form
+		if err := json.Unmarshal(s.Payload, &f); err != nil {
+			return err
+		}
+		fc := f
+		l.forms[f.ID] = &fc
+		k := f.TenantID + "|" + f.Code
+		l.byCode[k] = append(l.byCode[k], f.ID)
+		if n, err := strconv.Atoi(strings.TrimPrefix(f.ID, "frm-")); err == nil && n > l.seq {
+			l.seq = n
+		}
+	}
+	for k := range l.byCode {
+		ids := l.byCode[k]
+		sort.Slice(ids, func(i, j int) bool { return l.forms[ids[i]].Version < l.forms[ids[j]].Version })
+	}
+	return nil
+}
 
 // SeedStandard publishes the standard PenCom form catalogue for a tenant.
 func (l *Library) SeedStandard(tenantID string) {
@@ -72,6 +107,11 @@ func (l *Library) SeedStandard(tenantID string) {
 		{"GDE-RET-01", "Retirement Planning Guide", CatGuide, "How to plan, invest and retire well"},
 	}
 	for _, f := range std {
+		// Idempotent: boot seeding must not mint new versions after a
+		// restore has already rehydrated the catalogue.
+		if len(l.Versions(tenantID, f.code)) > 0 {
+			continue
+		}
 		_, _ = l.Publish(tenantID, f.code, f.title, f.cat, f.desc, "seed://standard/"+f.code, "")
 	}
 }
@@ -82,11 +122,12 @@ func (l *Library) Publish(tenantID, code, title string, cat Category, desc, ref,
 		return Form{}, errors.New("docslib: tenant, code and title required")
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	k := tenantID + "|" + code
 	ver := len(l.byCode[k]) + 1
+	var changed []Form
 	for _, id := range l.byCode[k] {
 		l.forms[id].Active = false
+		changed = append(changed, *l.forms[id])
 	}
 	l.seq++
 	f := &Form{
@@ -96,6 +137,11 @@ func (l *Library) Publish(tenantID, code, title string, cat Category, desc, ref,
 	}
 	l.forms[f.ID] = f
 	l.byCode[k] = append(l.byCode[k], f.ID)
+	changed = append(changed, *f)
+	l.mu.Unlock()
+	for _, c := range changed {
+		persist.Save(l.sink, "docslib.form", tenantID, c.ID, c)
+	}
 	return *f, nil
 }
 

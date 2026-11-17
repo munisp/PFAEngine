@@ -150,6 +150,10 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8090/healthz"]
   employer-portal:
     build: { context: .., dockerfile: deploy/Dockerfile, args: { SERVICE: employer-portal } }
+    environment:
+      # Gap 2 — live Remita RRR generation for remittance files:
+      # REMITA_MERCHANT_ID / REMITA_API_KEY / REMITA_BASE_URL
+      PORT: "8091"
     ports: ["8091:8091"]
     depends_on: [postgres]
     healthcheck:
@@ -181,6 +185,19 @@ services:
     environment:
       KYC_SERVICE_URL: http://kyc-service:8105
       OLLAMA_URL: http://ollama:11434
+      # Gap 2 — live vendor adapters (leave unset for mock/dev mode):
+      # SMILE_ID_PARTNER_ID / SMILE_ID_API_KEY / SMILE_ID_BASE_URL
+      # DOJAH_APP_ID / DOJAH_SECRET_KEY / DOJAH_BASE_URL
+      # Gap 3 — open-source payroll (ERPNext/Frappe HR):
+      # ERPNEXT_BASE_URL / ERPNEXT_API_KEY / ERPNEXT_API_SECRET
+      # ERPNEXT_SCHEDULE_DOCTYPE (default "Contribution Schedule")
+      # Gap 4 — PenCom rails (assumed layouts pending bilateral specs):
+      # PENCAP_BASE_URL / PENCAP_PFA_CODE / PENCAP_API_KEY
+      # RTS_BASE_URL / RTS_PFA_CODE / RTS_API_KEY
+      # PSSP_BASE_URL / PSSP_PFA_CODE / PSSP_API_KEY
+      # Gap 5 — engine-state snapshots (db/migrations/0009_snapshots.sql):
+      # DATABASE_URL (already shared) enables state_snapshot write-through
+      # + boot rehydration for every stateful engine.
     ports: ["8096:8096"]
     depends_on: [postgres, kyc-service]
     healthcheck:

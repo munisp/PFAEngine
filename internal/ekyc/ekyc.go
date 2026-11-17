@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,7 @@ import (
 	"github.com/munisp/pfaengine/internal/casemgmt"
 	"github.com/munisp/pfaengine/internal/docupload"
 	"github.com/munisp/pfaengine/internal/kyc"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 var (
@@ -316,6 +318,7 @@ type Engine struct {
 	sessions map[string]*Session
 	seq      int
 	now      func() time.Time
+	sink     persist.Sink // nil in pure in-memory mode
 }
 
 func New(intel DocIntel, ks *kyc.Service, ce *casemgmt.Engine) *Engine {
@@ -326,13 +329,46 @@ func New(intel DocIntel, ks *kyc.Service, ce *casemgmt.Engine) *Engine {
 	}
 }
 
+// AttachSink wires write-through snapshot persistence (NFR-10). Only the
+// exported Session fields persist — raw document/selfie images never leave
+// process memory.
+func (e *Engine) AttachSink(s persist.Sink) { e.sink = s }
+
+// Restore rehydrates sessions from boot snapshots; foreign kinds ignored.
+// Mid-flight sessions restore without their raw images, so a subsequent
+// biometric step skips the face compare against the document portrait and
+// routes to manual review instead of failing.
+func (e *Engine) Restore(snaps []persist.Snapshot) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range persist.OfKind(snaps, "ekyc.session") {
+		var sess Session
+		if err := json.Unmarshal(s.Payload, &sess); err != nil {
+			return err
+		}
+		sc := sess
+		e.sessions[sess.ID] = &sc
+		if n, err := strconv.Atoi(strings.TrimPrefix(sess.ID, "ky-")); err == nil && n > e.seq {
+			e.seq = n
+		}
+	}
+	return nil
+}
+
+// persistAfter persists the returned session when err == nil. Register
+// BEFORE the mutex-unlock defer so it runs after the lock is released.
+func (e *Engine) persistAfter(sess *Session, err *error) {
+	if *err == nil && sess != nil && sess.ID != "" {
+		persist.Save(e.sink, "ekyc.session", sess.TenantID, sess.ID, *sess)
+	}
+}
+
 // SetClock overrides the clock (tests).
 func (e *Engine) SetClock(f func() time.Time) { e.mu.Lock(); e.now = f; e.mu.Unlock() }
 
 // Start opens a new verification session for a member.
 func (e *Engine) Start(tenantID, memberID, actor string) Session {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.seq++
 	s := &Session{
 		ID:       fmt.Sprintf("ky-%06d", e.seq),
@@ -342,7 +378,10 @@ func (e *Engine) Start(tenantID, memberID, actor string) Session {
 	}
 	e.logLocked(s, actor, "STARTED", "verification session opened")
 	e.sessions[s.ID] = s
-	return *s
+	out := *s
+	e.mu.Unlock()
+	persist.Save(e.sink, "ekyc.session", tenantID, out.ID, out)
+	return out
 }
 
 func (e *Engine) Get(tenantID, id string) (Session, error) {
@@ -403,7 +442,8 @@ func (e *Engine) flagLocked(s *Session, flag string, weight int) {
 // intelligence (OCR + field extraction, optional VLM cross-validation).
 // imageB64 may be empty (ref-only submissions) — the session then relies on
 // manual review. Advances DOCUMENT_CAPTURE -> DOC_ANALYSIS.
-func (e *Engine) SubmitDocument(tenantID, id string, kind docupload.Kind, ref, imageB64 string, useVLM bool, actor string) (Session, error) {
+func (e *Engine) SubmitDocument(tenantID, id string, kind docupload.Kind, ref, imageB64 string, useVLM bool, actor string) (sess Session, err error) {
+	defer func() { e.persistAfter(&sess, &err) }()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := e.get(tenantID, id)
@@ -456,7 +496,8 @@ func (e *Engine) SubmitDocument(tenantID, id string, kind docupload.Kind, ref, i
 // VerifyIdentity cross-checks the extracted document against NIN and BVN via
 // internal/kyc, and checks the doc-extracted identifiers against the
 // applicant-supplied ones. Advances DOC_ANALYSIS -> IDENTITY_CHECK.
-func (e *Engine) VerifyIdentity(tenantID, id, nin, bvn, name, dob, phone, actor string) (Session, error) {
+func (e *Engine) VerifyIdentity(tenantID, id, nin, bvn, name, dob, phone, actor string) (sess Session, err error) {
+	defer func() { e.persistAfter(&sess, &err) }()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := e.get(tenantID, id)
@@ -525,7 +566,8 @@ func nameTokensOverlap(a, b string) bool {
 // SubmitBiometric runs passive liveness on the selfie frames and face-matches
 // the selfie against the identity document portrait. Advances
 // IDENTITY_CHECK -> BIOMETRIC.
-func (e *Engine) SubmitBiometric(tenantID, id string, frames []string, actor string) (Session, error) {
+func (e *Engine) SubmitBiometric(tenantID, id string, frames []string, actor string) (sess Session, err error) {
+	defer func() { e.persistAfter(&sess, &err) }()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := e.get(tenantID, id)
@@ -588,7 +630,8 @@ func (e *Engine) SubmitBiometric(tenantID, id string, frames []string, actor str
 // Decide scores the accumulated risk and reaches a decision. MANUAL_REVIEW
 // sessions open a casemgmt KYC_REVIEW case for the ops team. Advances
 // BIOMETRIC -> DECIDED.
-func (e *Engine) Decide(tenantID, id, actor string) (Session, error) {
+func (e *Engine) Decide(tenantID, id, actor string) (sess Session, err error) {
+	defer func() { e.persistAfter(&sess, &err) }()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := e.get(tenantID, id)
@@ -649,7 +692,8 @@ func (e *Engine) Decide(tenantID, id, actor string) (Session, error) {
 
 // Override lets staff approve or reject a manual-review session, resolving
 // the linked KYC_REVIEW case when one exists.
-func (e *Engine) Override(tenantID, id string, approve bool, actor, note string) (Session, error) {
+func (e *Engine) Override(tenantID, id string, approve bool, actor, note string) (sess Session, err error) {
+	defer func() { e.persistAfter(&sess, &err) }()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := e.get(tenantID, id)

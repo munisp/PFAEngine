@@ -9,29 +9,31 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Inputs are the measured signals for one employer over a period.
 type Inputs struct {
-	RemittancesOnTime  int `json:"remittances_on_time"`  // count
-	RemittancesTotal   int `json:"remittances_total"`    // count
-	EmployeesCovered   int `json:"employees_covered"`    // with active RSA
-	EmployeesTotal     int `json:"employees_total"`
-	AvgContribBps      int64 `json:"avg_contrib_bps"`       // avg total rate, statutory min 1800
+	RemittancesOnTime int   `json:"remittances_on_time"` // count
+	RemittancesTotal  int   `json:"remittances_total"`   // count
+	EmployeesCovered  int   `json:"employees_covered"`   // with active RSA
+	EmployeesTotal    int   `json:"employees_total"`
+	AvgContribBps     int64 `json:"avg_contrib_bps"` // avg total rate, statutory min 1800
 }
 
 // Report is the computed index.
 type Report struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"tenant_id"`
-	EmployerID     string    `json:"employer_id"`
-	Period         string    `json:"period"` // YYYY-MM
-	Timeliness     int       `json:"timeliness"`  // 0–100
-	Coverage       int       `json:"coverage"`    // 0–100
-	Adequacy       int       `json:"adequacy"`    // 0–100 (1800bps = 60, 3000bps = 100)
-	Index          int       `json:"index"`       // weighted composite
-	Grade          string    `json:"grade"`       // A ≥80, B ≥65, C ≥50, D <50
-	ComputedAt     time.Time `json:"computed_at"`
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	EmployerID string    `json:"employer_id"`
+	Period     string    `json:"period"`     // YYYY-MM
+	Timeliness int       `json:"timeliness"` // 0–100
+	Coverage   int       `json:"coverage"`   // 0–100
+	Adequacy   int       `json:"adequacy"`   // 0–100 (1800bps = 60, 3000bps = 100)
+	Index      int       `json:"index"`      // weighted composite
+	Grade      string    `json:"grade"`      // A ≥80, B ≥65, C ≥50, D <50
+	ComputedAt time.Time `json:"computed_at"`
 }
 
 func pct(num, den int) int {
@@ -61,6 +63,7 @@ type Engine struct {
 	mu      sync.Mutex
 	reports []Report
 	seq     int
+	sink    persist.Sink
 }
 
 func NewEngine() *Engine { return &Engine{} }
@@ -83,6 +86,7 @@ func (e *Engine) Compute(tenantID, employerID, period string, in Inputs, at time
 		Period: period, Timeliness: timeliness, Coverage: coverage, Adequacy: adequacy,
 		Index: idx, Grade: grade(idx), ComputedAt: at}
 	e.reports = append(e.reports, r)
+	persist.Save(e.sink, kindReport, tenantID, r.ID, r)
 	return r
 }
 

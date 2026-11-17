@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // PackItem is one completeness check on a claim pack.
 type PackItem struct {
-	Key   string `json:"key"`   // KYC | DOCS | EMPLOYER_CERT | BANK_VERIFIED | MPG_SCREEN
+	Key   string `json:"key"` // KYC | DOCS | EMPLOYER_CERT | BANK_VERIFIED | MPG_SCREEN
 	Label string `json:"label"`
 	Done  bool   `json:"done"`
 }
@@ -46,6 +48,7 @@ type Engine struct {
 	mu    sync.Mutex
 	packs map[string]*Pack // tenantID|rsaID
 	seq   int
+	sink  persist.Sink
 }
 
 func NewEngine() *Engine { return &Engine{packs: map[string]*Pack{}} }
@@ -78,6 +81,7 @@ func (e *Engine) Open(tenantID, rsaID string, at time.Time) Pack {
 	p := &Pack{ID: fmt.Sprintf("cf-%06d", e.seq), TenantID: tenantID, RSAID: rsaID,
 		Items: items, Score: s, Missing: missing, CreatedAt: at}
 	e.packs[key] = p
+	persist.Save(e.sink, kindPack, tenantID, p.ID, p)
 	return *p
 }
 
@@ -101,6 +105,7 @@ func (e *Engine) Complete(tenantID, rsaID, key string) (Pack, error) {
 	}
 	p.Score, p.Missing = score(p.Items)
 	p.STP = p.Score >= STPThreshold
+	persist.Save(e.sink, kindPack, tenantID, p.ID, p)
 	return *p, nil
 }
 

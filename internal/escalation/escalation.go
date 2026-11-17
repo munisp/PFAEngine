@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	ErrNoRule    = errors.New("escalation: no rule for member")
-	ErrBadStep   = errors.New("escalation: step and cap must be positive, cap >= base")
-	ErrOptedOut  = errors.New("escalation: member opted out — re-enrol first")
+	ErrNoRule   = errors.New("escalation: no rule for member")
+	ErrBadStep  = errors.New("escalation: step and cap must be positive, cap >= base")
+	ErrOptedOut = errors.New("escalation: member opted out — re-enrol first")
 )
 
 // Rule is one member's escalation schedule. Rates in basis points of
@@ -26,8 +26,8 @@ type Rule struct {
 	TenantID     string    `json:"tenant_id"`
 	MemberID     string    `json:"member_id"`
 	BaseRateBps  int64     `json:"base_rate_bps"`
-	StepBps      int64     `json:"step_bps"`      // annual step
-	MaxBps       int64     `json:"max_bps"`       // cap
+	StepBps      int64     `json:"step_bps"` // annual step
+	MaxBps       int64     `json:"max_bps"`  // cap
 	CurrentBps   int64     `json:"current_bps"`
 	OptedOut     bool      `json:"opted_out"`
 	OptOutReason string    `json:"opt_out_reason,omitempty"`

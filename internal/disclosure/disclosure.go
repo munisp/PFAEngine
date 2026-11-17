@@ -6,11 +6,16 @@
 package disclosure
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Kind enumerates disclosure types.
@@ -41,10 +46,32 @@ type Registry struct {
 	mu   sync.Mutex
 	pubs map[string]*Publication
 	seq  int
+	sink persist.Sink // nil in pure in-memory mode
 }
 
 // New returns an empty registry.
 func New() *Registry { return &Registry{pubs: map[string]*Publication{}} }
+
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (r *Registry) AttachSink(s persist.Sink) { r.sink = s }
+
+// Restore rehydrates publications from boot snapshots; foreign kinds ignored.
+func (r *Registry) Restore(snaps []persist.Snapshot) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range persist.OfKind(snaps, "disclosure.pub") {
+		var p Publication
+		if err := json.Unmarshal(s.Payload, &p); err != nil {
+			return err
+		}
+		pc := p
+		r.pubs[p.ID] = &pc
+		if n, err := strconv.Atoi(strings.TrimPrefix(p.ID, "dis-")); err == nil && n > r.seq {
+			r.seq = n
+		}
+	}
+	return nil
+}
 
 // Publish releases a disclosure. Duplicate kind+period is rejected — a
 // correction is a new period label, never an overwrite (WORM).
@@ -58,9 +85,9 @@ func (r *Registry) Publish(tenantID string, kind Kind, title, period, ref, sha, 
 		return Publication{}, fmt.Errorf("disclosure: unsupported kind %s", kind)
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	for _, p := range r.pubs {
 		if p.TenantID == tenantID && p.Kind == kind && p.Period == period {
+			r.mu.Unlock()
 			return Publication{}, fmt.Errorf("disclosure: %s for %s already published (WORM — corrections need a new period label)", kind, period)
 		}
 	}
@@ -71,7 +98,10 @@ func (r *Registry) Publish(tenantID string, kind Kind, title, period, ref, sha, 
 		PublishedBy: by, PublishedAt: time.Now(),
 	}
 	r.pubs[p.ID] = p
-	return *p, nil
+	out := *p
+	r.mu.Unlock()
+	persist.Save(r.sink, "disclosure.pub", tenantID, out.ID, out)
+	return out, nil
 }
 
 // List returns disclosures, optionally filtered by kind, newest period first.

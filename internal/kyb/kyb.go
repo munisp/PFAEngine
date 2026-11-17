@@ -7,16 +7,19 @@
 package kyb
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/munisp/pfaengine/internal/aml"
 	"github.com/munisp/pfaengine/internal/casemgmt"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 var (
@@ -98,6 +101,7 @@ type Engine struct {
 	biz   map[string]*Business
 	seq   int
 	now   func() time.Time
+	sink  persist.Sink // nil in pure in-memory mode
 }
 
 func New(a *aml.Service, ce *casemgmt.Engine) *Engine {
@@ -105,6 +109,27 @@ func New(a *aml.Service, ce *casemgmt.Engine) *Engine {
 		aml: a, cases: ce, biz: map[string]*Business{},
 		now: func() time.Time { return time.Now().UTC() },
 	}
+}
+
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (e *Engine) AttachSink(s persist.Sink) { e.sink = s }
+
+// Restore rehydrates businesses from boot snapshots; foreign kinds ignored.
+func (e *Engine) Restore(snaps []persist.Snapshot) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range persist.OfKind(snaps, "kyb.business") {
+		var b Business
+		if err := json.Unmarshal(s.Payload, &b); err != nil {
+			return err
+		}
+		bc := b
+		e.biz[b.ID] = &bc
+		if n, err := strconv.Atoi(strings.TrimPrefix(b.ID, "kb-")); err == nil && n > e.seq {
+			e.seq = n
+		}
+	}
+	return nil
 }
 
 // NormalizeRC canonicalises a CAC RC number (strip spaces, uppercase).
@@ -115,7 +140,12 @@ func NormalizeRC(rc string) string {
 // Submit registers and verifies a business. The decision is immediate:
 // VERIFIED, MANUAL_REVIEW (opens a casemgmt KYC_REVIEW case), or REJECTED
 // (sanctions hit on any principal).
-func (e *Engine) Submit(tenantID, employerID, name, rc, tin string, directors []Person, ubos []UBO, docRefs []string, actor string) (Business, error) {
+func (e *Engine) Submit(tenantID, employerID, name, rc, tin string, directors []Person, ubos []UBO, docRefs []string, actor string) (biz Business, err error) {
+	defer func() {
+		if err == nil && biz.ID != "" {
+			persist.Save(e.sink, "kyb.business", biz.TenantID, biz.ID, biz)
+		}
+	}()
 	rc = NormalizeRC(rc)
 	if !reRC.MatchString(rc) {
 		return Business{}, ErrBadRC
@@ -258,7 +288,12 @@ func (e *Engine) List(tenantID string, status string) []Business {
 
 // Review lets staff approve or reject a MANUAL_REVIEW business, resolving
 // the linked KYC_REVIEW case.
-func (e *Engine) Review(tenantID, id string, approve bool, actor, note string) (Business, error) {
+func (e *Engine) Review(tenantID, id string, approve bool, actor, note string) (biz Business, err error) {
+	defer func() {
+		if err == nil && biz.ID != "" {
+			persist.Save(e.sink, "kyb.business", biz.TenantID, biz.ID, biz)
+		}
+	}()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	b, ok := e.biz[id]

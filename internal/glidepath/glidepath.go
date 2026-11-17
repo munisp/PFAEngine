@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Fund is a PenCom RSA multi-fund.
@@ -24,31 +26,31 @@ const (
 )
 
 var (
-	ErrNoMember      = errors.New("glidepath: member not registered")
+	ErrNoMember       = errors.New("glidepath: member not registered")
 	ErrFundNotAllowed = errors.New("glidepath: fund not allowed for member age/status")
 )
 
 // Member is a glidepath assignment record.
 type Member struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	MemberID  string    `json:"member_id"`
-	AgeYears  int       `json:"age_years"`
-	Retired   bool      `json:"retired"`
-	Fund      Fund      `json:"fund"`
-	Aggressive bool     `json:"aggressive"` // Fund I election (<50 only)
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	MemberID   string    `json:"member_id"`
+	AgeYears   int       `json:"age_years"`
+	Retired    bool      `json:"retired"`
+	Fund       Fund      `json:"fund"`
+	Aggressive bool      `json:"aggressive"` // Fund I election (<50 only)
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // Switch is a fund-movement audit record.
 type Switch struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	MemberID  string    `json:"member_id"`
-	From      Fund      `json:"from"`
-	To        Fund      `json:"to"`
-	Reason    string    `json:"reason"` // AGE_BAND | RETIREMENT | ELECTION
-	At        time.Time `json:"at"`
+	ID       string    `json:"id"`
+	TenantID string    `json:"tenant_id"`
+	MemberID string    `json:"member_id"`
+	From     Fund      `json:"from"`
+	To       Fund      `json:"to"`
+	Reason   string    `json:"reason"` // AGE_BAND | RETIREMENT | ELECTION
+	At       time.Time `json:"at"`
 }
 
 // DefaultFundFor returns the default fund for an age/retirement status.
@@ -69,6 +71,7 @@ type Engine struct {
 	members  map[string]*Member // tenantID|memberID
 	switches []Switch
 	seq      int
+	sink     persist.Sink
 }
 
 func NewEngine() *Engine { return &Engine{members: map[string]*Member{}} }
@@ -100,6 +103,7 @@ func (e *Engine) Register(tenantID, memberID string, age int, retired, aggressiv
 	m := &Member{ID: fmt.Sprintf("gp-%06d", e.seq), TenantID: tenantID, MemberID: memberID,
 		AgeYears: age, Retired: retired, Fund: f, Aggressive: aggressive, UpdatedAt: at}
 	e.members[tenantID+"|"+memberID] = m
+	persist.Save(e.sink, kindMember, tenantID, m.ID, m)
 	return *m, nil
 }
 
@@ -137,9 +141,11 @@ func (e *Engine) Birthday(tenantID, memberID string, at time.Time) (*Switch, err
 		sw := e.recordSwitch(m, target, "AGE_BAND", at)
 		if m.AgeYears >= 50 {
 			m.Aggressive = false // Fund I election lapses at 50
+			persist.Save(e.sink, kindMember, m.TenantID, m.ID, m)
 		}
 		return &sw, nil
 	}
+	persist.Save(e.sink, kindMember, m.TenantID, m.ID, m)
 	return nil, nil
 }
 
@@ -155,6 +161,7 @@ func (e *Engine) Retire(tenantID, memberID string, at time.Time) (Switch, error)
 	m.Aggressive = false
 	m.UpdatedAt = at
 	if m.Fund == FundIV {
+		persist.Save(e.sink, kindMember, m.TenantID, m.ID, m)
 		return Switch{TenantID: tenantID, MemberID: memberID, From: FundIV, To: FundIV, Reason: "RETIREMENT", At: at}, nil
 	}
 	return e.recordSwitch(m, FundIV, "RETIREMENT", at), nil
@@ -168,6 +175,8 @@ func (e *Engine) recordSwitch(m *Member, to Fund, reason string, at time.Time) S
 	m.Fund = to
 	m.UpdatedAt = at
 	e.switches = append(e.switches, sw)
+	persist.Save(e.sink, kindSwitch, m.TenantID, sw.ID, sw)
+	persist.Save(e.sink, kindMember, m.TenantID, m.ID, m)
 	return sw
 }
 

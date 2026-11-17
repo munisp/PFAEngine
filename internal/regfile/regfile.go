@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // FilingKind classifies an obligation.
@@ -35,21 +36,21 @@ const (
 )
 
 var (
-	ErrNoFiling     = errors.New("regfile: filing not found")
+	ErrNoFiling      = errors.New("regfile: filing not found")
 	ErrBadTransition = errors.New("regfile: invalid filing transition")
 )
 
 // Filing is one obligation instance.
 type Filing struct {
-	ID        string     `json:"id"`
-	TenantID  string     `json:"tenant_id"`
-	Kind      FilingKind `json:"kind"`
-	Period    string     `json:"period"`   // YYYY-MM or YYYY-Qn
-	DueDate   time.Time  `json:"due_date"`
-	Status    Status     `json:"status"`
-	Payload   string     `json:"payload"`  // generated return body
-	FiledAt   *time.Time `json:"filed_at,omitempty"`
-	Penalty   money.Kobo `json:"penalty_kobo"` // accrued lateness penalty
+	ID       string     `json:"id"`
+	TenantID string     `json:"tenant_id"`
+	Kind     FilingKind `json:"kind"`
+	Period   string     `json:"period"` // YYYY-MM or YYYY-Qn
+	DueDate  time.Time  `json:"due_date"`
+	Status   Status     `json:"status"`
+	Payload  string     `json:"payload"` // generated return body
+	FiledAt  *time.Time `json:"filed_at,omitempty"`
+	Penalty  money.Kobo `json:"penalty_kobo"` // accrued lateness penalty
 }
 
 // PenaltyMonthlyBps is the PRA s.11 lateness penalty: 2% per month.
@@ -60,6 +61,7 @@ type Engine struct {
 	mu      sync.Mutex
 	filings map[string]*Filing
 	seq     int
+	sink    persist.Sink
 }
 
 func NewEngine() *Engine { return &Engine{filings: map[string]*Filing{}} }
@@ -72,6 +74,7 @@ func (e *Engine) Schedule(tenantID string, kind FilingKind, period string, due t
 	f := &Filing{ID: fmt.Sprintf("rf-%06d", e.seq), TenantID: tenantID, Kind: kind,
 		Period: period, DueDate: due, Status: StatusPending}
 	e.filings[tenantID+"|"+f.ID] = f
+	persist.Save(e.sink, kindFiling, tenantID, f.ID, f)
 	return *f
 }
 
@@ -92,6 +95,7 @@ func (e *Engine) Generate(tenantID, id, payload string, at time.Time) (Filing, e
 	} else {
 		f.Status = StatusGenerated
 	}
+	persist.Save(e.sink, kindFiling, tenantID, f.ID, f)
 	return *f, nil
 }
 
@@ -113,6 +117,7 @@ func (e *Engine) File(tenantID, id string, outstanding money.Kobo, at time.Time)
 	}
 	f.Status = StatusFiled
 	f.FiledAt = &at
+	persist.Save(e.sink, kindFiling, tenantID, f.ID, f)
 	return *f, nil
 }
 

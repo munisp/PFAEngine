@@ -28,6 +28,7 @@ import (
 	"github.com/munisp/pfaengine/internal/micropension"
 	"github.com/munisp/pfaengine/internal/news"
 	"github.com/munisp/pfaengine/internal/onboarding"
+	"github.com/munisp/pfaengine/internal/payroll"
 	"github.com/munisp/pfaengine/internal/prefs"
 	"github.com/munisp/pfaengine/internal/recon"
 	"github.com/munisp/pfaengine/internal/retiree"
@@ -38,27 +39,28 @@ import (
 func newTestDeps() *deps {
 	ce := casemgmt.New(nil)
 	d := &deps{
-		kyc:         kyc.NewService("test-salt", kyc.MockProvider{ProviderName: "mock-nimc"}),
-		members:     member.NewRegistry(),
-		ledger:      ledger.New(),
-		recon:       recon.NewEngine(),
-		audit:       audit.NewStore(),
-		authn:       authn.NewService("test-signing-secret-0123456789"),
-		retirees:    retiree.NewRegister(),
-		prefs:       prefs.NewPersistentStore(prefs.NewStore(), nil),
-		alive:       newAliveTracker(),
-		onb:         onboarding.NewPersistentStore(onboarding.NewStore(audit.NewStore()), nil),
-		onbPayloads: map[string]onboardPayload{},
-		micro:       map[string]*micropension.Account{},
-		stmtSecret:  []byte("test-statement-secret"),
-		cases:       ce,
-		fraud:       fraud.NewEngine(),
-		docslib:     docslib.New(),
-		branch:      branch.New(),
-		disclosure:  disclosure.New(),
-		news:        news.New(),
-		funds:       funds.NewRegistry(),
-		tenants:     tenancy.NewRegistry(),
+		kyc:          kyc.NewService("test-salt", kyc.MockProvider{ProviderName: "mock-nimc"}),
+		members:      member.NewRegistry(),
+		ledger:       ledger.New(),
+		recon:        recon.NewEngine(),
+		audit:        audit.NewStore(),
+		authn:        authn.NewService("test-signing-secret-0123456789"),
+		retirees:     retiree.NewRegister(),
+		prefs:        prefs.NewPersistentStore(prefs.NewStore(), nil),
+		alive:        newAliveTracker(),
+		onb:          onboarding.NewPersistentStore(onboarding.NewStore(audit.NewStore()), nil),
+		onbPayloads:  map[string]onboardPayload{},
+		micro:        map[string]*micropension.Account{},
+		stmtSecret:   []byte("test-statement-secret"),
+		cases:        ce,
+		fraud:        fraud.NewEngine(),
+		docslib:      docslib.New(),
+		branch:       branch.New(),
+		disclosure:   disclosure.New(),
+		news:         news.New(),
+		funds:        funds.NewRegistry(),
+		tenants:      tenancy.NewRegistry(),
+		paySchedules: map[string]payroll.Schedule{},
 	}
 	d.docslib.SeedStandard("t1")
 	d.funds.SeedStandard("t1")

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 // Lang is a supported content language.
@@ -54,6 +56,7 @@ type Engine struct {
 	lessons  map[string]*Lesson
 	progress map[string]*Progress // tenantID|memberID|lessonID
 	seq      int
+	sink     persist.Sink
 }
 
 func NewEngine() *Engine {
@@ -68,6 +71,7 @@ func (e *Engine) AddLesson(lang Lang, topic, title, body, question string, optio
 	l := &Lesson{ID: fmt.Sprintf("lit-%06d", e.seq), Lang: lang, Topic: topic, Title: title,
 		Body: body, Question: question, Options: options, Answer: answer}
 	e.lessons[l.ID] = l
+	persist.Save(e.sink, kindLesson, globalTenant, l.ID, snapshotLesson(l))
 	return *l
 }
 
@@ -99,6 +103,7 @@ func (e *Engine) Answer(tenantID, memberID, lessonID string, option int, at time
 	p := &Progress{TenantID: tenantID, MemberID: memberID, LessonID: lessonID,
 		Passed: option == l.Answer, CompletedAt: at}
 	e.progress[tenantID+"|"+memberID+"|"+lessonID] = p
+	persist.Save(e.sink, kindProgress, tenantID, tenantID+"|"+memberID+"|"+lessonID, p)
 	return *p, nil
 }
 
@@ -121,6 +126,12 @@ func (e *Engine) Score(tenantID, memberID string) (passed, total int) {
 // Seed ships the launch catalogue (EN + PCM for the three highest-impact
 // topics; other languages added by content ops through AddLesson).
 func (e *Engine) Seed() {
+	e.mu.Lock()
+	nonEmpty := len(e.lessons) > 0
+	e.mu.Unlock()
+	if nonEmpty {
+		return // idempotent: never duplicate the catalogue (e.g. after restore)
+	}
 	e.AddLesson(LangEN, "MPG", "The ₦52,500 floor", "If your monthly pension is below ₦52,500 the Minimum Pension Guarantee tops it up from the Pension Protection Fund.", "Who funds the MPG top-up?", []string{"Your employer only", "The Pension Protection Fund", "Your bank"}, 1)
 	e.AddLesson(LangPC, "MPG", "Di ₦52,500 floor", "If your pension small pass ₦52,500, government go top am up from di Pension Protection Fund.", "Who dey pay di top-up?", []string{"Na your oga only", "Na di Pension Protection Fund", "Na your bank"}, 1)
 	e.AddLesson(LangEN, "AVC", "Save more, retire better", "Additional Voluntary Contributions grow your RSA faster and can be withdrawn partially before retirement under PenCom rules.", "What does AVC stand for?", []string{"Additional Voluntary Contribution", "Annual Verified Credit", "Approved Vendor Charge"}, 0)

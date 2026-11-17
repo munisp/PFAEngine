@@ -816,6 +816,60 @@ paths:
       summary: Staff review of a manual-review business
       tags: [KYB]
       responses: { '200': { description: OK } }
+  /v1/payroll/erpnext/sync:
+    post:
+      summary: "Payroll: pull an ERPNext Payroll Entry into a contribution schedule"
+      tags: [Payroll]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/payroll/schedules/{id}/push:
+    post:
+      summary: "Payroll: push a stored schedule to ERPNext"
+      tags: [Payroll]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/payroll/pssp/import:
+    post:
+      summary: "Payroll: import a PSSP schedule CSV (format=pensphere|pension-central)"
+      tags: [Payroll]
+      responses: { '200': { description: OK } }
+  /v1/payroll/pssp/export:
+    get:
+      summary: "Payroll: export a schedule as a PSSP CSV (format=pensphere|pension-central)"
+      tags: [Payroll]
+      responses: { '200': { description: OK } }
+  /v1/pencom/recapture:
+    post:
+      summary: "PenCom rails: submit a PENCAP data-recapture batch"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/pencom/recapture/{batchId}:
+    get:
+      summary: "PenCom rails: fetch PENCAP recapture validation results"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/pencom/transfers:
+    post:
+      summary: "PenCom rails: initiate an RSA transfer via the RTS hub"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+    get:
+      summary: "PenCom rails: poll inbound RTS transfer instructions"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/pencom/transfers/{id}/confirm:
+    post:
+      summary: "PenCom rails: confirm an inbound RTS transfer"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/pencom/pssp/schedules:
+    post:
+      summary: "PenCom rails: submit a contribution schedule to the PSSP"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
+  /v1/pencom/pssp/schedules/{ref}:
+    get:
+      summary: "PenCom rails: poll PSSP schedule processing status"
+      tags: [PenComRails]
+      responses: { '200': { description: OK }, '503': { description: Rail unconfigured } }
   /v1/forms:
     get:
       summary: List published forms (filter — category)

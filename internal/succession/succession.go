@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	ErrShares     = errors.New("succession: beneficiary shares must total 10000 bps (100%)")
+	ErrShares       = errors.New("succession: beneficiary shares must total 10000 bps (100%)")
 	ErrNoNomination = errors.New("succession: no nomination for member")
 )
 
@@ -27,14 +27,14 @@ type Beneficiary struct {
 
 // Nomination is one versioned nomination (history is WORM).
 type Nomination struct {
-	ID              string        `json:"id"`
-	TenantID        string        `json:"tenant_id"`
-	MemberID        string        `json:"member_id"`
-	Version         int           `json:"version"`
-	Beneficiaries   []Beneficiary `json:"beneficiaries"`
-	ConfirmedAt     time.Time     `json:"confirmed_at"`      // liveness confirmation
-	NextReconfirmDue time.Time    `json:"next_reconfirm_due"`
-	Superseded      bool          `json:"superseded"` // true once a newer version exists
+	ID               string        `json:"id"`
+	TenantID         string        `json:"tenant_id"`
+	MemberID         string        `json:"member_id"`
+	Version          int           `json:"version"`
+	Beneficiaries    []Beneficiary `json:"beneficiaries"`
+	ConfirmedAt      time.Time     `json:"confirmed_at"` // liveness confirmation
+	NextReconfirmDue time.Time     `json:"next_reconfirm_due"`
+	Superseded       bool          `json:"superseded"` // true once a newer version exists
 }
 
 // Engine holds nomination history.

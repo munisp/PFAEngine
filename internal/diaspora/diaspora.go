@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 var (
@@ -23,24 +24,24 @@ var (
 
 // Member is a diaspora enrollee (passport-tier KYC).
 type Member struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	RSAID     string    `json:"rsa_id"`
-	Country   string    `json:"country"` // ISO 3166-1 alpha-2
-	PassportRef string  `json:"passport_ref"`
-	EnrolledAt time.Time `json:"enrolled_at"`
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	RSAID       string    `json:"rsa_id"`
+	Country     string    `json:"country"` // ISO 3166-1 alpha-2
+	PassportRef string    `json:"passport_ref"`
+	EnrolledAt  time.Time `json:"enrolled_at"`
 }
 
 // Contribution is one FCY remittance booked into the RSA.
 type Contribution struct {
-	ID           string     `json:"id"`
-	TenantID     string     `json:"tenant_id"`
-	RSAID        string     `json:"rsa_id"`
-	Currency     string     `json:"currency"`
-	AmountMinor  int64      `json:"amount_minor"` // cents/pence
-	RateKoboPerUnit int64   `json:"rate_kobo_per_unit"` // kobo per 1.00 unit
-	Credited     money.Kobo `json:"credited_kobo"`
-	At           time.Time  `json:"at"`
+	ID              string     `json:"id"`
+	TenantID        string     `json:"tenant_id"`
+	RSAID           string     `json:"rsa_id"`
+	Currency        string     `json:"currency"`
+	AmountMinor     int64      `json:"amount_minor"`       // cents/pence
+	RateKoboPerUnit int64      `json:"rate_kobo_per_unit"` // kobo per 1.00 unit
+	Credited        money.Kobo `json:"credited_kobo"`
+	At              time.Time  `json:"at"`
 }
 
 // Engine holds members, FX rates and contributions.
@@ -50,6 +51,7 @@ type Engine struct {
 	rates    map[string]int64   // currency -> kobo per unit
 	contribs []Contribution
 	seq      int
+	sink     persist.Sink
 }
 
 func NewEngine() *Engine {
@@ -61,6 +63,7 @@ func (e *Engine) SetRate(currency string, koboPerUnit int64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.rates[currency] = koboPerUnit
+	persist.Save(e.sink, kindRate, globalTenant, currency, rateState{Currency: currency, KoboPerUnit: koboPerUnit})
 }
 
 // Enrol registers a diaspora member on the passport tier.
@@ -71,6 +74,7 @@ func (e *Engine) Enrol(tenantID, rsaID, country, passportRef string, at time.Tim
 	m := &Member{ID: fmt.Sprintf("dia-%06d", e.seq), TenantID: tenantID, RSAID: rsaID,
 		Country: country, PassportRef: passportRef, EnrolledAt: at}
 	e.members[tenantID+"|"+rsaID] = m
+	persist.Save(e.sink, kindMember, tenantID, m.ID, m)
 	return *m, nil
 }
 
@@ -98,6 +102,7 @@ func (e *Engine) Contribute(tenantID, rsaID, currency string, amountMinor int64,
 		Currency: currency, AmountMinor: amountMinor, RateKoboPerUnit: rate,
 		Credited: money.Kobo(amountMinor * rate / 100), At: at}
 	e.contribs = append(e.contribs, c)
+	persist.Save(e.sink, kindContribution, tenantID, c.ID, c)
 	return c, nil
 }
 

@@ -58,18 +58,18 @@ var (
 
 // Assessment is the MPG decision for one retiree in one payroll period.
 type Assessment struct {
-	ID             string     `json:"id"`
-	TenantID       string     `json:"tenant_id"`
-	RSAID          string     `json:"rsa_id"`
-	Sector         Sector     `json:"sector"`
-	StateCode      string     `json:"state_code,omitempty"` // STATE sector only
-	Period         string     `json:"period"`               // YYYY-MM
+	ID              string     `json:"id"`
+	TenantID        string     `json:"tenant_id"`
+	RSAID           string     `json:"rsa_id"`
+	Sector          Sector     `json:"sector"`
+	StateCode       string     `json:"state_code,omitempty"` // STATE sector only
+	Period          string     `json:"period"`               // YYYY-MM
 	ComputedPension money.Kobo `json:"computed_pension_kobo"`
-	Minimum        money.Kobo `json:"minimum_kobo"`
-	TopUp          money.Kobo `json:"topup_kobo"` // 0 when not eligible
-	Eligible       bool       `json:"eligible"`
-	Gated          bool       `json:"gated"` // true: below floor but blocked (state not in PPF)
-	AssessedAt     time.Time  `json:"assessed_at"`
+	Minimum         money.Kobo `json:"minimum_kobo"`
+	TopUp           money.Kobo `json:"topup_kobo"` // 0 when not eligible
+	Eligible        bool       `json:"eligible"`
+	Gated           bool       `json:"gated"` // true: below floor but blocked (state not in PPF)
+	AssessedAt      time.Time  `json:"assessed_at"`
 }
 
 // Contribution is one receipt into the Pension Protection Fund. Records
@@ -86,11 +86,11 @@ type Contribution struct {
 
 // Review carries the actuarial-validation metadata for the MPG floor.
 type Review struct {
-	Minimum           money.Kobo `json:"minimum_kobo"`
-	ActuariallyValid  bool       `json:"actuarially_validated"`
-	ValidatedBy       string     `json:"validated_by,omitempty"` // actuary / PenCom circular ref
-	EffectivePeriod   string     `json:"effective_period"`       // YYYY-MM from which the floor applies
-	NextReviewDue     time.Time  `json:"next_review_due"`        // periodic review schedule
+	Minimum          money.Kobo `json:"minimum_kobo"`
+	ActuariallyValid bool       `json:"actuarially_validated"`
+	ValidatedBy      string     `json:"validated_by,omitempty"` // actuary / PenCom circular ref
+	EffectivePeriod  string     `json:"effective_period"`       // YYYY-MM from which the floor applies
+	NextReviewDue    time.Time  `json:"next_review_due"`        // periodic review schedule
 }
 
 // Engine holds the MPG floor, the PPF ledger, and the state-gating set.

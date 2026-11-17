@@ -12,25 +12,26 @@ import (
 	"time"
 
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 var (
-	ErrNoWallet  = errors.New("roundup: no wallet for member")
-	ErrBadStep   = errors.New("roundup: step must be positive")
+	ErrNoWallet   = errors.New("roundup: no wallet for member")
+	ErrBadStep    = errors.New("roundup: step must be positive")
 	ErrCapReached = errors.New("roundup: monthly cap reached")
 )
 
 // Wallet is one member's round-up AVC accumulator.
 type Wallet struct {
-	ID            string     `json:"id"`
-	TenantID      string     `json:"tenant_id"`
-	MemberID      string     `json:"member_id"`
-	Step          money.Kobo `json:"step_kobo"`        // rounding step, e.g. ₦100
-	MonthlyCap    money.Kobo `json:"monthly_cap_kobo"` // 0 = uncapped
-	Swept         money.Kobo `json:"swept_kobo"`       // lifetime swept
+	ID             string     `json:"id"`
+	TenantID       string     `json:"tenant_id"`
+	MemberID       string     `json:"member_id"`
+	Step           money.Kobo `json:"step_kobo"`        // rounding step, e.g. ₦100
+	MonthlyCap     money.Kobo `json:"monthly_cap_kobo"` // 0 = uncapped
+	Swept          money.Kobo `json:"swept_kobo"`       // lifetime swept
 	SweptThisMonth money.Kobo `json:"swept_this_month_kobo"`
-	Month         string     `json:"month"` // YYYY-MM of SweptThisMonth
-	CreatedAt     time.Time  `json:"created_at"`
+	Month          string     `json:"month"` // YYYY-MM of SweptThisMonth
+	CreatedAt      time.Time  `json:"created_at"`
 }
 
 // Sweep is one round-up transfer into the AVC wallet.
@@ -50,6 +51,7 @@ type Engine struct {
 	wallets map[string]*Wallet // tenantID|memberID
 	sweeps  []Sweep
 	seq     int
+	sink    persist.Sink
 }
 
 func NewEngine() *Engine { return &Engine{wallets: map[string]*Wallet{}} }
@@ -69,6 +71,7 @@ func (e *Engine) Open(tenantID, memberID string, step, monthlyCap money.Kobo, at
 	w := &Wallet{ID: fmt.Sprintf("ru-%06d", e.seq), TenantID: tenantID, MemberID: memberID,
 		Step: step, MonthlyCap: monthlyCap, CreatedAt: at}
 	e.wallets[key] = w
+	persist.Save(e.sink, kindWallet, tenantID, w.ID, w)
 	return *w, nil
 }
 
@@ -109,6 +112,8 @@ func (e *Engine) SweepTx(tenantID, memberID string, txAmount money.Kobo, at time
 	e.sweeps = append(e.sweeps, s)
 	w.Swept += diff
 	w.SweptThisMonth += diff
+	persist.Save(e.sink, kindWallet, tenantID, w.ID, w)
+	persist.Save(e.sink, kindSweep, tenantID, s.ID, s)
 	return s, nil
 }
 

@@ -109,7 +109,7 @@ func TestTranche17InnovateRoundTrip(t *testing.T) {
 	// Succession: two versions, current = latest, WORM blocks updates.
 	n1 := succession.Nomination{ID: "nom-" + sfx + "-1", TenantID: tenant, MemberID: "m1", Version: 1,
 		Beneficiaries: []succession.Beneficiary{{Name: "Ada", ShareBps: 10000}},
-		ConfirmedAt: now, NextReconfirmDue: now.AddDate(1, 0, 0)}
+		ConfirmedAt:   now, NextReconfirmDue: now.AddDate(1, 0, 0)}
 	n2 := n1
 	n2.ID = "nom-" + sfx + "-2"
 	n2.Version = 2

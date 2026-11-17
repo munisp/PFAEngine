@@ -18,17 +18,17 @@ import (
 type AppStatus string
 
 const (
-	AppSubmitted  AppStatus = "SUBMITTED"
-	AppApproved   AppStatus = "APPROVED"
-	AppDisbursed  AppStatus = "DISBURSED"
-	AppRejected   AppStatus = "REJECTED"
+	AppSubmitted AppStatus = "SUBMITTED"
+	AppApproved  AppStatus = "APPROVED"
+	AppDisbursed AppStatus = "DISBURSED"
+	AppRejected  AppStatus = "REJECTED"
 )
 
 var (
-	ErrOverCap      = errors.New("mortgage: amount exceeds 25% of RSA balance (PRA s.89(2))")
-	ErrNotEmployed  = errors.New("mortgage: applicant must be in employment")
-	ErrBadAmount    = errors.New("mortgage: amount must be positive")
-	ErrNoApp        = errors.New("mortgage: application not found")
+	ErrOverCap       = errors.New("mortgage: amount exceeds 25% of RSA balance (PRA s.89(2))")
+	ErrNotEmployed   = errors.New("mortgage: applicant must be in employment")
+	ErrBadAmount     = errors.New("mortgage: amount must be positive")
+	ErrNoApp         = errors.New("mortgage: application not found")
 	ErrBadTransition = errors.New("mortgage: invalid status transition")
 )
 
@@ -37,16 +37,16 @@ func MaxEquity(rsaBalance money.Kobo) money.Kobo { return rsaBalance / 4 }
 
 // Application is one mortgage equity-contribution request.
 type Application struct {
-	ID         string     `json:"id"`
-	TenantID   string     `json:"tenant_id"`
-	MemberID   string     `json:"member_id"`
-	RSABalance money.Kobo `json:"rsa_balance_kobo"`
-	Amount     money.Kobo `json:"amount_kobo"` // ≤ 25% of balance
-	LenderRef  string     `json:"lender_ref"`  // mortgage lender reference
-	Status     AppStatus  `json:"status"`
-	Reason     string     `json:"reason,omitempty"` // rejection reason
-	Events     []string   `json:"events"`
-	SubmittedAt time.Time `json:"submitted_at"`
+	ID          string     `json:"id"`
+	TenantID    string     `json:"tenant_id"`
+	MemberID    string     `json:"member_id"`
+	RSABalance  money.Kobo `json:"rsa_balance_kobo"`
+	Amount      money.Kobo `json:"amount_kobo"` // ≤ 25% of balance
+	LenderRef   string     `json:"lender_ref"`  // mortgage lender reference
+	Status      AppStatus  `json:"status"`
+	Reason      string     `json:"reason,omitempty"` // rejection reason
+	Events      []string   `json:"events"`
+	SubmittedAt time.Time  `json:"submitted_at"`
 	DecidedAt   *time.Time `json:"decided_at,omitempty"`
 }
 

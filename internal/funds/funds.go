@@ -3,6 +3,7 @@
 package funds
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/munisp/pfaengine/internal/money"
+	"github.com/munisp/pfaengine/internal/persist"
 )
 
 var ErrNoPrice = errors.New("funds: no NAV published for that date")
@@ -65,6 +67,7 @@ type Registry struct {
 	funds    map[string]*Fund
 	navs     map[string]map[string]money.Kobo // fundID -> date -> price
 	holdings map[string]map[string]money.Unit // rsaID -> fundID -> units
+	sink     persist.Sink                     // nil in pure in-memory mode
 }
 
 func NewRegistry() *Registry {
@@ -74,19 +77,75 @@ func NewRegistry() *Registry {
 	}
 }
 
-func (r *Registry) Register(f Fund) { r.mu.Lock(); r.funds[f.ID] = &f; r.mu.Unlock() }
+// AttachSink wires write-through snapshot persistence (NFR-10).
+func (r *Registry) AttachSink(s persist.Sink) { r.sink = s }
+
+// holdingRecord is the persisted shape of one RSA's units in one fund.
+type holdingRecord struct {
+	TenantID string     `json:"tenant_id"`
+	RsaID    string     `json:"rsa_id"`
+	FundID   string     `json:"fund_id"`
+	Units    money.Unit `json:"units"`
+}
+
+// Restore rehydrates funds, NAV series and holdings from boot snapshots.
+func (r *Registry) Restore(snaps []persist.Snapshot) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range snaps {
+		switch s.Kind {
+		case "funds.fund":
+			var f Fund
+			if err := json.Unmarshal(s.Payload, &f); err != nil {
+				return err
+			}
+			fc := f
+			r.funds[f.ID] = &fc
+		case "funds.nav":
+			var n NAV
+			if err := json.Unmarshal(s.Payload, &n); err != nil {
+				return err
+			}
+			if r.navs[n.FundID] == nil {
+				r.navs[n.FundID] = map[string]money.Kobo{}
+			}
+			r.navs[n.FundID][n.Date] = n.Price
+		case "funds.holding":
+			var h holdingRecord
+			if err := json.Unmarshal(s.Payload, &h); err != nil {
+				return err
+			}
+			if r.holdings[h.RsaID] == nil {
+				r.holdings[h.RsaID] = map[string]money.Unit{}
+			}
+			r.holdings[h.RsaID][h.FundID] = h.Units
+		}
+	}
+	return nil
+}
+
+func (r *Registry) Register(f Fund) {
+	r.mu.Lock()
+	r.funds[f.ID] = &f
+	r.mu.Unlock()
+	persist.Save(r.sink, "funds.fund", f.TenantID, f.ID, f)
+}
 
 // PublishNAV publishes the daily price; emits fund.nav.published upstream.
 func (r *Registry) PublishNAV(fundID, date string, price money.Kobo) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.funds[fundID]; !ok {
+	f, ok := r.funds[fundID]
+	if !ok {
+		r.mu.Unlock()
 		return fmt.Errorf("funds: unknown fund %s", fundID)
 	}
+	tenantID := f.TenantID
 	if r.navs[fundID] == nil {
 		r.navs[fundID] = map[string]money.Kobo{}
 	}
 	r.navs[fundID][date] = price
+	r.mu.Unlock()
+	persist.Save(r.sink, "funds.nav", tenantID, fundID+"|"+date, NAV{FundID: fundID, Date: date, Price: price})
 	return nil
 }
 
@@ -111,11 +170,20 @@ func (r *Registry) Allocate(rsaID, fundID, date string, amount money.Kobo) (mone
 		return 0, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.holdings[rsaID] == nil {
 		r.holdings[rsaID] = map[string]money.Unit{}
 	}
 	r.holdings[rsaID][fundID] += u
+	total := r.holdings[rsaID][fundID]
+	tenantID := ""
+	if f, ok := r.funds[fundID]; ok {
+		tenantID = f.TenantID
+	}
+	r.mu.Unlock()
+	if tenantID != "" {
+		persist.Save(r.sink, "funds.holding", tenantID, rsaID+"|"+fundID,
+			holdingRecord{TenantID: tenantID, RsaID: rsaID, FundID: fundID, Units: total})
+	}
 	return u, nil
 }
 
